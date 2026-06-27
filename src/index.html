@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self';" />
+  <title>SMR</title>
+
+  <!-- highlight.js themes: only one is enabled at a time, toggled by theme. -->
+  <link id="hljs-light" rel="stylesheet" href="../node_modules/highlight.js/styles/github.min.css" />
+  <link id="hljs-dark" rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.min.css" disabled />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <button id="btn-toc" class="iconbtn" title="Toggle table of contents (Ctrl+T)" aria-label="Toggle table of contents">☰</button>
+    <span id="filename">No file open</span>
+    <span class="spacer"></span>
+    <button id="btn-theme" class="iconbtn" title="Toggle dark mode (Ctrl+D)" aria-label="Toggle dark mode">🌙</button>
+  </header>
+
+  <div id="body">
+    <nav id="toc" aria-label="Table of contents">
+      <div class="toc-title">Contents</div>
+      <ul id="toc-list"></ul>
+    </nav>
+
+    <main id="main">
+      <article id="content" class="markdown-body"></article>
+
+      <div id="empty-state">
+        <div class="empty-icon">📄</div>
+        <h1>SMR</h1>
+        <p>Open a file with <kbd>Ctrl</kbd>+<kbd>O</kbd>, or drop a <code>.md</code> file here.</p>
+      </div>
+    </main>
+  </div>
+
+  <div id="drop-overlay"><div class="drop-msg">Drop to open</div></div>
+
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

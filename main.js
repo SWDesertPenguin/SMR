@@ -3,15 +3,21 @@ const fs = require('fs');
 const path = require('path');
 
 let mainWindow = null;
-let currentFilePath = null;
-let watcher = null;
-let watchDebounce = null;
+let forceClose = false;      // set true once the user confirms quitting with unsaved work
+let dirtyCount = 0;          // mirrored from the renderer so the close handler stays synchronous
 
-const FILE_FILTERS = [
-  { name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] },
-  { name: 'Text', extensions: ['txt'] },
-  { name: 'All Files', extensions: ['*'] }
-];
+const watchers = new Map();      // path -> fs.FSWatcher
+const watchDebounce = new Map(); // path -> timeout handle
+
+// The reader only deals in Markdown. This list is the single source of truth for
+// both the dialog filters and the per-path extension check used at every entry point.
+const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
+const FILE_FILTERS = [{ name: 'Markdown', extensions: MD_EXTS }];
+
+function isMarkdown(filePath) {
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  return MD_EXTS.includes(ext);
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -21,6 +27,7 @@ function createWindow() {
     minHeight: 360,
     backgroundColor: '#ffffff',
     title: 'SMR',
+    icon: path.join(__dirname, 'icon-dark.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -48,121 +55,211 @@ function createWindow() {
     }
   });
 
+  // Intercept close so unsaved tabs get a confirmation. dirtyCount is kept in sync
+  // by the renderer (app:dirty), which lets this stay synchronous.
+  mainWindow.on('close', (event) => {
+    if (forceClose || dirtyCount === 0) return;
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      buttons: ['Quit Without Saving', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'You have unsaved changes.',
+      detail: `${dirtyCount} file(s) have unsaved changes. Quit without saving?`
+    });
+    if (choice === 0) forceClose = true;
+    else event.preventDefault();
+  });
+
   mainWindow.on('closed', () => {
-    stopWatching();
+    stopAllWatching();
     mainWindow = null;
   });
 }
 
-// --- File loading + watching ---------------------------------------------
+// --- Reading -------------------------------------------------------------
 
-function stopWatching() {
-  if (watcher) {
-    watcher.close();
-    watcher = null;
+// Read a file for display in a tab. The md-only rule is enforced here so every
+// entry point (dialog, drag-drop, launch arg, recent docs) is covered, not just
+// the open dialog's filter.
+function readForTab(filePath) {
+  if (!isMarkdown(filePath)) {
+    return { error: `Not a Markdown file: ${path.basename(filePath)}` };
   }
-  if (watchDebounce) {
-    clearTimeout(watchDebounce);
-    watchDebounce = null;
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    app.addRecentDocument(filePath);
+    return { path: filePath, name: path.basename(filePath), content };
+  } catch (err) {
+    return { error: err.message };
   }
 }
 
+function pushOpen(filePath) {
+  const r = readForTab(filePath);
+  if (r.error) {
+    dialog.showErrorBox('Could not open file', `${filePath}\n\n${r.error}`);
+    return;
+  }
+  if (mainWindow) mainWindow.webContents.send('tabs:open', [r]);
+}
+
+// --- Watching ------------------------------------------------------------
+
+function stopWatching(filePath) {
+  const w = watchers.get(filePath);
+  if (w) {
+    w.close();
+    watchers.delete(filePath);
+  }
+  const t = watchDebounce.get(filePath);
+  if (t) {
+    clearTimeout(t);
+    watchDebounce.delete(filePath);
+  }
+}
+
+function stopAllWatching() {
+  for (const filePath of [...watchers.keys()]) stopWatching(filePath);
+}
+
 function startWatching(filePath) {
-  stopWatching();
   try {
-    watcher = fs.watch(filePath, (eventType) => {
+    const w = fs.watch(filePath, (eventType) => {
       // Debounce: editors often fire several events per save.
-      if (watchDebounce) clearTimeout(watchDebounce);
-      watchDebounce = setTimeout(() => {
+      const prev = watchDebounce.get(filePath);
+      if (prev) clearTimeout(prev);
+      watchDebounce.set(filePath, setTimeout(() => {
+        watchDebounce.delete(filePath);
+        if (!fs.existsSync(filePath)) return; // removed; leave the tab alone
+        try {
+          const content = fs.readFileSync(filePath, 'utf8');
+          if (mainWindow) mainWindow.webContents.send('file:changed', { path: filePath, content });
+        } catch (_) { /* transient read error during save; ignore */ }
+        // Atomic saves replace the inode, so the original watch is now stale.
         if (eventType === 'rename') {
-          // File may have been replaced (atomic save) or removed. Re-establish,
-          // or stop watching if it's gone so the stale handle isn't leaked.
-          if (fs.existsSync(filePath)) {
-            startWatching(filePath);
-            sendFile(filePath, { live: true });
-          } else {
-            stopWatching();
-          }
-        } else {
-          sendFile(filePath, { live: true });
+          stopWatching(filePath);
+          if (fs.existsSync(filePath)) startWatching(filePath);
         }
-      }, 120);
+      }, 120));
     });
+    watchers.set(filePath, w);
   } catch (err) {
     // Non-fatal: watching just won't work for this file.
     console.error('watch failed:', err);
   }
 }
 
-function sendFile(filePath, opts = {}) {
-  fs.readFile(filePath, 'utf8', (err, content) => {
-    if (err) {
-      if (!opts.live) {
-        dialog.showErrorBox('Could not open file', `${filePath}\n\n${err.message}`);
-      }
-      return;
-    }
-    if (!mainWindow) return;
-    mainWindow.webContents.send('file:loaded', {
-      path: filePath,
-      name: path.basename(filePath),
-      content,
-      live: !!opts.live
-    });
+// Reconcile the watcher set to exactly the paths the renderer has open.
+function setWatched(paths) {
+  const wanted = new Set(paths.filter((p) => typeof p === 'string' && p));
+  for (const filePath of [...watchers.keys()]) {
+    if (!wanted.has(filePath)) stopWatching(filePath);
+  }
+  for (const filePath of wanted) {
+    if (!watchers.has(filePath)) startWatching(filePath);
+  }
+}
+
+// --- IPC from renderer ---------------------------------------------------
+
+ipcMain.handle('dialog:open', async () => {
+  if (!mainWindow) return { files: [] };
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Open Markdown File',
+    properties: ['openFile', 'multiSelections'],
+    filters: FILE_FILTERS
   });
-}
-
-function loadFile(filePath) {
-  currentFilePath = filePath;
-  app.addRecentDocument(filePath);
-  startWatching(filePath);
-  sendFile(filePath);
-}
-
-async function openFileDialog() {
-  if (!mainWindow) return;
-  try {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Open Markdown File',
-      properties: ['openFile'],
-      filters: FILE_FILTERS
-    });
-    if (!canceled && filePaths.length > 0) {
-      loadFile(filePaths[0]);
-    }
-  } catch (err) {
-    console.error('open dialog failed:', err);
+  if (canceled) return { files: [] };
+  const files = [];
+  for (const p of filePaths) {
+    const r = readForTab(p);
+    if (r.error) dialog.showErrorBox('Could not open file', `${p}\n\n${r.error}`);
+    else files.push(r);
   }
-}
-
-function reloadCurrent() {
-  if (currentFilePath) sendFile(currentFilePath);
-}
-
-function closeFile() {
-  stopWatching();
-  currentFilePath = null;
-  if (mainWindow) mainWindow.webContents.send('file:closed');
-}
-
-// --- IPC from renderer -----------------------------------------------------
-
-// Drag-and-drop: renderer hands us a path; we centralize read + watch here.
-ipcMain.handle('file:open-path', (_evt, filePath) => {
-  if (typeof filePath === 'string' && filePath.length > 0) {
-    loadFile(filePath);
-    return true;
-  }
-  return false;
+  return { files };
 });
 
-ipcMain.on('view:toggle-toc', () => sendMenuAction('toggle-toc'));
+// Drag-and-drop hands us a path; we centralize read + the md-only check here.
+ipcMain.handle('file:open-path', (_evt, filePath) => {
+  if (typeof filePath !== 'string' || !filePath) return { error: 'Invalid path' };
+  const r = readForTab(filePath);
+  if (r.error) dialog.showErrorBox('Could not open file', `${filePath}\n\n${r.error}`);
+  return r;
+});
+
+ipcMain.handle('file:read', (_evt, filePath) => {
+  try {
+    return { content: fs.readFileSync(filePath, 'utf8') };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('file:save', (_evt, { path: filePath, content }) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { ok: true };
+  } catch (err) {
+    dialog.showErrorBox('Could not save file', `${filePath}\n\n${err.message}`);
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('dialog:save', async (_evt, { content, name }) => {
+  if (!mainWindow) return { canceled: true };
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Markdown File',
+    defaultPath: name || 'Untitled.md',
+    filters: FILE_FILTERS
+  });
+  if (canceled || !filePath) return { canceled: true };
+  // Enforce a Markdown extension even if the user typed a bare name.
+  const out = isMarkdown(filePath) ? filePath : `${filePath}.md`;
+  try {
+    fs.writeFileSync(out, content, 'utf8');
+    app.addRecentDocument(out);
+    return { path: out, name: path.basename(out) };
+  } catch (err) {
+    dialog.showErrorBox('Could not save file', `${out}\n\n${err.message}`);
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('watch:set', (_evt, paths) => {
+  setWatched(Array.isArray(paths) ? paths : []);
+});
+
+ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    message: `Save changes to ${name}?`,
+    detail: "Your changes will be lost if you don't save them."
+  });
+  return ['save', 'discard', 'cancel'][response];
+});
+
+ipcMain.on('app:dirty', (_evt, n) => {
+  dirtyCount = Number(n) || 0;
+});
+
+// --- Application menu ----------------------------------------------------
 
 function sendMenuAction(action) {
   if (mainWindow) mainWindow.webContents.send('menu:action', action);
 }
 
-// --- Application menu ------------------------------------------------------
+function showAbout() {
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'About SMR',
+    message: 'SMR — Standalone Markdown Reader & Editor',
+    detail: 'A simple desktop Markdown reader and editor.\nOpen files with Ctrl+O, edit them side-by-side, and save with Ctrl+S.'
+  });
+}
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';
@@ -172,26 +269,38 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: openFileDialog },
-        { label: 'Reload File', accelerator: 'CmdOrCtrl+R', click: reloadCurrent },
-        { label: 'Close File', accelerator: 'CmdOrCtrl+W', click: closeFile },
+        { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('new') },
+        { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('open') },
         { type: 'separator' },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save') },
+        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-as') },
+        { label: 'Reload From Disk', accelerator: 'CmdOrCtrl+R', click: () => sendMenuAction('reload') },
+        { type: 'separator' },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => sendMenuAction('close-tab') },
         isMac ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
       ]
     },
     {
       label: 'View',
       submenu: [
-        {
-          label: 'Toggle Dark Mode',
-          accelerator: 'CmdOrCtrl+D',
-          click: () => sendMenuAction('toggle-theme')
-        },
-        {
-          label: 'Toggle Table of Contents',
-          accelerator: 'CmdOrCtrl+T',
-          click: () => sendMenuAction('toggle-toc')
-        },
+        { label: 'Toggle Dark Mode', accelerator: 'CmdOrCtrl+D', click: () => sendMenuAction('toggle-theme') },
+        { label: 'Toggle Table of Contents', accelerator: 'CmdOrCtrl+T', click: () => sendMenuAction('toggle-toc') },
+        { label: 'Cycle Layout (Split / Preview / Editor)', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('toggle-layout') },
+        { type: 'separator' },
+        { label: 'Next Tab', accelerator: 'CmdOrCtrl+PageDown', click: () => sendMenuAction('next-tab') },
+        { label: 'Previous Tab', accelerator: 'CmdOrCtrl+PageUp', click: () => sendMenuAction('prev-tab') },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -203,37 +312,23 @@ function buildMenu() {
     },
     {
       label: 'Help',
-      submenu: [
-        {
-          label: 'About SMR',
-          click: () => {
-            dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: 'About SMR',
-              message: 'SMR — Standalone Markdown Reader',
-              detail: 'A simple desktop Markdown reader.\nOpen a file with Ctrl+O, or drag one onto the window.'
-            });
-          }
-        }
-      ]
+      submenu: [{ label: 'About SMR', click: showAbout }]
     }
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// --- App lifecycle ---------------------------------------------------------
+// --- App lifecycle -------------------------------------------------------
 
 app.whenReady().then(() => {
   buildMenu();
   createWindow();
 
-  // If launched with a file path argument, open it.
-  const fileArg = process.argv.find(
-    (a) => a !== '.' && /\.(md|markdown|mdown|mkd|txt)$/i.test(a)
-  );
+  // If launched with a file path argument, open it once the renderer is ready.
+  const fileArg = process.argv.find((a) => a !== '.' && isMarkdown(a));
   if (fileArg && fs.existsSync(fileArg)) {
-    mainWindow.webContents.once('did-finish-load', () => loadFile(fileArg));
+    mainWindow.webContents.once('did-finish-load', () => pushOpen(fileArg));
   }
 
   app.on('activate', () => {
@@ -245,16 +340,16 @@ app.whenReady().then(() => {
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
   if (mainWindow) {
-    loadFile(filePath);
+    pushOpen(filePath);
   } else {
     app.whenReady().then(() => {
       createWindow();
-      mainWindow.webContents.once('did-finish-load', () => loadFile(filePath));
+      mainWindow.webContents.once('did-finish-load', () => pushOpen(filePath));
     }).catch((err) => console.error('open-file handling failed:', err));
   }
 });
 
 app.on('window-all-closed', () => {
-  stopWatching();
+  stopAllWatching();
   if (process.platform !== 'darwin') app.quit();
 });

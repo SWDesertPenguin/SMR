@@ -12,6 +12,8 @@
   --quote-border: #d0d7de;
   --toc-active: #0969da;
   --selection: #b6e3ff;
+  --accent: #0969da;
+  --warn: #bf8700;
 }
 
 [data-theme='dark'] {
@@ -27,6 +29,8 @@
   --quote-border: #30363d;
   --toc-active: #4493f8;
   --selection: #1f6feb55;
+  --accent: #4493f8;
+  --warn: #d29922;
 }
 
 * { box-sizing: border-box; }
@@ -48,11 +52,11 @@ html, body {
   height: 44px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 0 12px;
   background: var(--topbar-bg);
   border-bottom: 1px solid var(--border);
-  z-index: 10;
+  z-index: 20;
   user-select: none;
 }
 
@@ -63,6 +67,7 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-left: 4px;
 }
 
 .spacer { flex: 1; }
@@ -77,14 +82,90 @@ html, body {
   padding: 6px 8px;
   cursor: pointer;
 }
-.iconbtn:hover { background: var(--bg-alt); border-color: var(--border); }
+.iconbtn:hover { background: var(--bg); border-color: var(--border); }
+
+/* ---- Tab bar ------------------------------------------------------------ */
+#tabbar {
+  position: fixed;
+  top: 44px; left: 0; right: 0;
+  height: 36px;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  z-index: 15;
+  user-select: none;
+}
+body.no-tabs #tabbar { display: none; }
+
+#tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 0 8px 0 12px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover { background: var(--bg); }
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tab.conflict .tab-name { color: var(--warn); }
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.tab-close:hover { background: var(--border); opacity: 1; }
+
+.tab-new {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  width: 34px;
+  cursor: pointer;
+}
+.tab-new:hover { background: var(--bg); color: var(--text); }
 
 /* ---- Layout ------------------------------------------------------------- */
 #body {
   display: flex;
   height: 100%;
-  padding-top: 44px;
+  padding-top: 80px; /* topbar (44) + tabbar (36) */
 }
+body.no-tabs #body { padding-top: 44px; }
 
 #toc {
   width: 260px;
@@ -94,7 +175,8 @@ html, body {
   overflow-y: auto;
   padding: 16px 8px 32px;
 }
-body.toc-hidden #toc { display: none; }
+body.toc-hidden #toc,
+body.no-tabs #toc { display: none; }
 
 .toc-title {
   font-size: 11px;
@@ -130,17 +212,52 @@ body.toc-hidden #toc { display: none; }
 .toc-h4 a { padding-left: 44px; }
 .toc-empty { color: var(--text-muted); font-size: 13px; padding: 4px 8px; }
 
-#main {
+/* Editor + preview panes. Layout classes on <body> control which show. */
+#editor-pane {
+  display: flex;
   flex: 1;
+  min-width: 0;
+}
+#editors {
+  position: relative;
+  flex: 1;
+}
+.editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  padding: 16px 20px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+#preview-pane {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
   position: relative;
 }
 
+body.layout-split #preview-pane { border-left: 1px solid var(--border); }
+body.layout-preview #editor-pane { display: none; }
+body.layout-editor #preview-pane { display: none; }
+body.no-tabs #editor-pane,
+body.no-tabs #preview-pane { display: none; }
+
 /* ---- Empty state -------------------------------------------------------- */
 #empty-state {
   position: absolute;
-  inset: 0;
-  display: flex;
+  top: 44px;
+  left: 0; right: 0; bottom: 0;
+  display: none;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -148,6 +265,7 @@ body.toc-hidden #toc { display: none; }
   color: var(--text-muted);
   padding: 24px;
 }
+body.no-tabs #empty-state { display: flex; }
 .empty-icon { font-size: 56px; opacity: 0.6; margin-bottom: 8px; }
 #empty-state h1 { color: var(--text); margin: 0 0 8px; font-size: 28px; }
 #empty-state kbd {
@@ -178,7 +296,7 @@ body.toc-hidden #toc { display: none; }
   margin: 24px 0 16px;
   font-weight: 600;
   line-height: 1.25;
-  scroll-margin-top: 56px;
+  scroll-margin-top: 16px;
 }
 .markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
 .markdown-body h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }

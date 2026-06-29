@@ -1,7 +1,7 @@
 {
   "name": "smr",
   "version": "1.0.0",
-  "description": "SMR (Standalone Markdown Reader): a simple desktop Markdown reader",
+  "description": "SMR (Standalone Markdown Reader): a simple desktop Markdown reader and editor with tabs",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -25,6 +25,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "icon-dark.png",
       "src/**/*",
       "node_modules/**/*"
     ],
@@ -32,15 +33,16 @@
       {
         "ext": "md",
         "name": "Markdown Document",
-        "role": "Viewer"
+        "role": "Editor"
       },
       {
         "ext": "markdown",
         "name": "Markdown Document",
-        "role": "Viewer"
+        "role": "Editor"
       }
     ],
     "win": {
+      "icon": "icon-dark.ico",
       "target": [
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }

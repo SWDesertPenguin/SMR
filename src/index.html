@@ -12,13 +12,22 @@
 
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="layout-split no-tabs">
   <header id="topbar">
     <button id="btn-toc" class="iconbtn" title="Toggle table of contents (Ctrl+T)" aria-label="Toggle table of contents">☰</button>
+    <button id="btn-new" class="iconbtn" title="New file (Ctrl+N)" aria-label="New file">🖉</button>
+    <button id="btn-open" class="iconbtn" title="Open file (Ctrl+O)" aria-label="Open file">📂</button>
+    <button id="btn-save" class="iconbtn" title="Save (Ctrl+S)" aria-label="Save">💾</button>
     <span id="filename">No file open</span>
     <span class="spacer"></span>
+    <button id="btn-layout" class="iconbtn" title="Cycle layout: split / preview / editor (Ctrl+E)" aria-label="Cycle layout">▥</button>
     <button id="btn-theme" class="iconbtn" title="Toggle dark mode (Ctrl+D)" aria-label="Toggle dark mode">🌙</button>
   </header>
+
+  <div id="tabbar" role="tablist">
+    <div id="tabs"></div>
+    <button id="btn-newtab" class="tab-new" title="New tab (Ctrl+N)" aria-label="New tab">+</button>
+  </div>
 
   <div id="body">
     <nav id="toc" aria-label="Table of contents">
@@ -26,15 +35,19 @@
       <ul id="toc-list"></ul>
     </nav>
 
-    <main id="main">
-      <article id="content" class="markdown-body"></article>
+    <section id="editor-pane">
+      <div id="editors"></div>
+    </section>
 
-      <div id="empty-state">
-        <div class="empty-icon">📄</div>
-        <h1>SMR</h1>
-        <p>Open a file with <kbd>Ctrl</kbd>+<kbd>O</kbd>, or drop a <code>.md</code> file here.</p>
-      </div>
-    </main>
+    <section id="preview-pane">
+      <article id="content" class="markdown-body"></article>
+    </section>
+
+    <div id="empty-state">
+      <div class="empty-icon">📄</div>
+      <h1>SMR</h1>
+      <p>Open a file with <kbd>Ctrl</kbd>+<kbd>O</kbd>, start a new one with <kbd>Ctrl</kbd>+<kbd>N</kbd>, or drop a <code>.md</code> file here.</p>
+    </div>
   </div>
 
   <div id="drop-overlay"><div class="drop-msg">Drop to open</div></div>

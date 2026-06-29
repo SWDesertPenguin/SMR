@@ -24,23 +24,11 @@ function highlight(code, lang) {
 
 // Minimal, explicit API surface for the renderer. No direct fs/ipc exposure.
 contextBridge.exposeInMainWorld('md', {
-  // Main → renderer: a file was loaded (or live-reloaded).
-  onFileLoaded: (cb) => {
-    ipcRenderer.on('file:loaded', (_evt, payload) => cb(payload));
-  },
+  // Markdown → sanitized HTML string.
+  parse: (markdown) => DOMPurify.sanitize(marked.parse(markdown), { ADD_ATTR: ['target'] }),
 
-  // Main → renderer: the current file was closed.
-  onFileClosed: (cb) => {
-    ipcRenderer.on('file:closed', () => cb());
-  },
-
-  // Main → renderer: a menu item was activated (toggle-theme, toggle-toc).
-  onMenuAction: (cb) => {
-    ipcRenderer.on('menu:action', (_evt, action) => cb(action));
-  },
-
-  // Renderer → main: open a file by path (used for drag-and-drop).
-  openPath: (filePath) => ipcRenderer.invoke('file:open-path', filePath),
+  // Syntax-highlight a code block → { value: html, language }.
+  highlight,
 
   // Resolve the absolute path of a dropped File object (replaces File.path).
   getPathForFile: (file) => {
@@ -51,9 +39,31 @@ contextBridge.exposeInMainWorld('md', {
     }
   },
 
-  // Markdown → sanitized HTML string.
-  parse: (markdown) => DOMPurify.sanitize(marked.parse(markdown), { ADD_ATTR: ['target'] }),
+  // Renderer → main: file service (all return plain result objects).
+  openDialog: () => ipcRenderer.invoke('dialog:open'),
+  saveDialog: (content, name) => ipcRenderer.invoke('dialog:save', { content, name }),
+  openPath: (filePath) => ipcRenderer.invoke('file:open-path', filePath),
+  save: (filePath, content) => ipcRenderer.invoke('file:save', { path: filePath, content }),
+  read: (filePath) => ipcRenderer.invoke('file:read', filePath),
+  setWatched: (paths) => ipcRenderer.invoke('watch:set', paths),
+  confirmClose: (name) => ipcRenderer.invoke('dialog:confirm-close', name),
 
-  // Syntax-highlight a code block → { value: html, language }.
-  highlight
+  // Renderer → main: keep the main process's unsaved-count mirror in sync so the
+  // window-close handler can decide synchronously.
+  notifyDirty: (n) => ipcRenderer.send('app:dirty', n),
+
+  // Main → renderer: open one or more files (launch arg, file association, recent).
+  onOpenTabs: (cb) => {
+    ipcRenderer.on('tabs:open', (_evt, payload) => cb(payload));
+  },
+
+  // Main → renderer: a watched file changed on disk.
+  onFileChanged: (cb) => {
+    ipcRenderer.on('file:changed', (_evt, payload) => cb(payload));
+  },
+
+  // Main → renderer: a menu item was activated.
+  onMenuAction: (cb) => {
+    ipcRenderer.on('menu:action', (_evt, action) => cb(action));
+  }
 });

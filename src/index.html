@@ -22,6 +22,7 @@
     <span class="spacer"></span>
     <button id="btn-layout" class="iconbtn" title="Cycle layout: split / preview / editor (Ctrl+E)" aria-label="Cycle layout">▥</button>
     <button id="btn-theme" class="iconbtn" title="Toggle dark mode (Ctrl+D)" aria-label="Toggle dark mode">🌙</button>
+    <button id="btn-help" class="iconbtn" title="Help" aria-label="Help">?</button>
   </header>
 
   <div id="tabbar" role="tablist">
@@ -35,13 +36,19 @@
       <ul id="toc-list"></ul>
     </nav>
 
-    <section id="editor-pane">
-      <div id="editors"></div>
-    </section>
+    <div class="gutter" id="gutter-toc" role="separator" aria-orientation="vertical" aria-label="Resize contents"></div>
 
-    <section id="preview-pane">
-      <article id="content" class="markdown-body"></article>
-    </section>
+    <div id="panes">
+      <section id="editor-pane">
+        <div id="editors"></div>
+      </section>
+
+      <div class="gutter" id="gutter-split" role="separator" aria-orientation="vertical" aria-label="Resize editor and preview"></div>
+
+      <section id="preview-pane">
+        <article id="content" class="markdown-body"></article>
+      </section>
+    </div>
 
     <div id="empty-state">
       <div class="empty-icon">📄</div>
@@ -51,6 +58,29 @@
   </div>
 
   <div id="drop-overlay"><div class="drop-msg">Drop to open</div></div>
+
+  <div id="help-overlay" hidden>
+    <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <button id="help-close" class="help-close" aria-label="Close help" title="Close (Esc)">×</button>
+      <h2 id="help-title">SMR — Standalone Markdown Reader</h2>
+      <p>Open one or more <code>.md</code> files as tabs, edit on the left, and watch the live preview on the right. Drag the dividers to resize any pane; in split view, scrolling one side scrolls the other.</p>
+
+      <h3>Getting started</h3>
+      <ul class="help-list">
+        <li>Open a file with the <strong>📂</strong> button, the File menu, or by dropping a <code>.md</code> file onto the window.</li>
+        <li>Start a blank file with <strong>🖉</strong>, then Save to give it a name.</li>
+        <li>Use <strong>▥</strong> to cycle between split, preview-only, and editor-only views.</li>
+        <li>Click a heading in <strong>Contents</strong> to jump to it; the list tracks your scroll position.</li>
+      </ul>
+
+      <h3>Keyboard shortcuts</h3>
+      <table class="help-shortcuts"><tbody id="help-shortcuts-body"></tbody></table>
+
+      <p class="help-foot">
+        <a id="help-github" href="#">SMR on GitHub ↗</a> — source code, issues, and documentation.
+      </p>
+    </div>
+  </div>
 
   <script type="module" src="renderer.js"></script>
 </body>

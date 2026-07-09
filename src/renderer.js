@@ -17,8 +17,18 @@ const btnOpen = document.getElementById('btn-open');
 const btnSave = document.getElementById('btn-save');
 const btnLayout = document.getElementById('btn-layout');
 const btnNewTab = document.getElementById('btn-newtab');
+const btnHelp = document.getElementById('btn-help');
 const linkLight = document.getElementById('hljs-light');
 const linkDark = document.getElementById('hljs-dark');
+const elBody = document.getElementById('body');
+const elPanes = document.getElementById('panes');
+const gutterToc = document.getElementById('gutter-toc');
+const gutterSplit = document.getElementById('gutter-split');
+const elHelpOverlay = document.getElementById('help-overlay');
+
+// Platform-aware modifier label: ⌘ on macOS, Ctrl elsewhere.
+const isMac = (window.md.platform || '') === 'darwin';
+const MOD = isMac ? '⌘' : 'Ctrl';
 
 // --- Tab state -------------------------------------------------------------
 // Each tab keeps its own <textarea> in the DOM (hidden when inactive) so it owns
@@ -66,7 +76,7 @@ function renderPreview(tab) {
   highlightCodeBlocks();
   buildToc();
   observeHeadings();
-  elPreview.scrollTop = keepScroll;
+  setScrollSilently(elPreview, keepScroll);
 }
 
 function assignHeadingIds() {
@@ -139,6 +149,49 @@ function scheduleRender() {
   }, 150);
 }
 
+// --- Synchronized scrolling ------------------------------------------------
+// In split view, scrolling either pane scrolls the other to the same relative
+// position. Setting scrollTop fires a scroll event on the target, which would
+// echo back into an infinite loop; each direction sets a one-shot lock that the
+// echoed event consumes. We only arm the lock when the value actually changes,
+// so a no-op set can't leave a lock stuck and swallow a later real scroll.
+let lockEditor = false;
+let lockPreview = false;
+
+function proportional(src, dst) {
+  const srcMax = src.scrollHeight - src.clientHeight;
+  const dstMax = dst.scrollHeight - dst.clientHeight;
+  if (srcMax <= 0 || dstMax <= 0) return null;
+  return (src.scrollTop / srcMax) * dstMax;
+}
+
+// Scroll `el` without triggering a sync back to the other pane.
+function setScrollSilently(el, top) {
+  if (Math.abs(el.scrollTop - top) < 0.5) return;
+  if (el === elPreview) lockPreview = true;
+  else lockEditor = true;
+  el.scrollTop = top;
+}
+
+function onEditorScroll(ta) {
+  // Only the active editor is visible, so only it can be scrolled by the user.
+  if (currentLayout !== 'split' || ta !== getActiveTab()?.el) return;
+  if (lockEditor) { lockEditor = false; return; }
+  const target = proportional(ta, elPreview);
+  if (target !== null) setScrollSilently(elPreview, target);
+}
+
+function onPreviewScroll() {
+  if (currentLayout !== 'split') return;
+  if (lockPreview) { lockPreview = false; return; }
+  const ta = getActiveTab()?.el;
+  if (!ta) return;
+  const target = proportional(elPreview, ta);
+  if (target !== null) setScrollSilently(ta, target);
+}
+
+elPreview.addEventListener('scroll', onPreviewScroll, { passive: true });
+
 // --- Tab creation / lifecycle ----------------------------------------------
 function makeTab({ path = null, name, content = '' }) {
   const norm = content.replace(/\r\n/g, '\n');
@@ -161,6 +214,7 @@ function makeTab({ path = null, name, content = '' }) {
 
   ta.addEventListener('input', () => onEdit(tab));
   ta.addEventListener('keydown', (e) => handleEditorKeys(e, tab));
+  ta.addEventListener('scroll', () => onEditorScroll(ta), { passive: true });
   elEditors.appendChild(ta);
   tabs.push(tab);
   return tab;
@@ -237,7 +291,7 @@ function switchTab(id) {
 
   document.body.classList.remove('no-tabs');
   renderPreview(tab);
-  elPreview.scrollTop = tab.previewScroll || 0;
+  setScrollSilently(elPreview, tab.previewScroll || 0);
   updateActiveUi();
   renderTabBar();
   if (currentLayout !== 'preview') tab.el.focus();
@@ -460,6 +514,111 @@ function cycleLayout() {
   setLayout(LAYOUTS[(i + 1) % LAYOUTS.length]);
 }
 
+// --- Resizable panes -------------------------------------------------------
+// Each gutter drives one CSS variable. Pointer capture keeps move/up events on
+// the gutter even while the cursor is over a textarea, and the values persist.
+function initGutter(gutter, onDrag) {
+  gutter.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    try { gutter.setPointerCapture(e.pointerId); } catch (_) { /* capture is best-effort */ }
+    gutter.classList.add('dragging');
+    document.body.classList.add('resizing');
+
+    const move = (ev) => onDrag(ev.clientX);
+    const end = () => {
+      gutter.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      gutter.removeEventListener('pointermove', move);
+      gutter.removeEventListener('pointerup', end);
+      gutter.removeEventListener('pointercancel', end);
+    };
+    gutter.addEventListener('pointermove', move);
+    gutter.addEventListener('pointerup', end);
+    gutter.addEventListener('pointercancel', end);
+  });
+}
+
+function setTocWidth(px) {
+  const w = Math.round(Math.max(140, Math.min(px, window.innerWidth * 0.6)));
+  document.documentElement.style.setProperty('--toc-width', `${w}px`);
+  localStorage.setItem('tocWidth', String(w));
+}
+
+function setSplitPos(fraction) {
+  const f = Math.max(0.15, Math.min(fraction, 0.85));
+  const pct = `${(f * 100).toFixed(2)}%`;
+  document.documentElement.style.setProperty('--split-pos', pct);
+  localStorage.setItem('splitPos', pct);
+}
+
+initGutter(gutterToc, (clientX) => {
+  setTocWidth(clientX - elBody.getBoundingClientRect().left);
+});
+initGutter(gutterSplit, (clientX) => {
+  const rect = elPanes.getBoundingClientRect();
+  if (rect.width > 0) setSplitPos((clientX - rect.left) / rect.width);
+});
+
+// --- Help overlay ----------------------------------------------------------
+// One row per shortcut; MOD is substituted with ⌘ or Ctrl and each key token
+// is wrapped in a <kbd> chip.
+const SHORTCUTS = [
+  ['New file', 'MOD+N'],
+  ['Open file', 'MOD+O'],
+  ['Save', 'MOD+S'],
+  ['Save As', 'MOD+Shift+S'],
+  ['Reload from disk', 'MOD+R'],
+  ['Close tab', 'MOD+W'],
+  ['Next / previous tab', 'MOD+PgDn / MOD+PgUp'],
+  ['Cycle layout', 'MOD+E'],
+  ['Toggle dark mode', 'MOD+D'],
+  ['Toggle contents', 'MOD+T']
+];
+
+function comboToHtml(combo) {
+  return combo
+    .replaceAll('MOD', MOD)
+    .split(' / ')
+    .map((part) => part.split('+').map((k) => `<kbd>${k}</kbd>`).join('+'))
+    .join(' / ');
+}
+
+function buildHelp() {
+  const body = document.getElementById('help-shortcuts-body');
+  if (body) {
+    body.innerHTML = SHORTCUTS
+      .map(([label, combo]) => `<tr><td>${label}</td><td>${comboToHtml(combo)}</td></tr>`)
+      .join('');
+  }
+  const gh = document.getElementById('help-github');
+  if (gh) {
+    gh.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.md.openExternal('https://github.com/SWDesertPenguin/SMR');
+    });
+  }
+  document.getElementById('help-close')?.addEventListener('click', hideHelp);
+  elHelpOverlay.addEventListener('click', (e) => {
+    if (e.target === elHelpOverlay) hideHelp();
+  });
+}
+
+function showHelp() { elHelpOverlay.hidden = false; }
+function hideHelp() { elHelpOverlay.hidden = true; }
+function toggleHelp() { elHelpOverlay.hidden ? showHelp() : hideHelp(); }
+
+// Rewrite Windows-style hints for macOS: ⌘ in tooltips and empty-state kbds.
+function localizeShortcuts() {
+  if (!isMac) return;
+  document.querySelectorAll('[title]').forEach((el) => {
+    if (el.title.includes('Ctrl+')) el.title = el.title.replaceAll('Ctrl+', '⌘');
+  });
+  document.querySelectorAll('#empty-state kbd').forEach((k) => {
+    if (k.textContent === 'Ctrl') k.textContent = '⌘';
+  });
+}
+
 // --- Open via dialog -------------------------------------------------------
 async function openViaDialog() {
   const res = await window.md.openDialog();
@@ -512,6 +671,7 @@ window.md.onMenuAction((action) => {
     case 'toggle-theme': toggleTheme(); break;
     case 'toggle-toc': toggleToc(); break;
     case 'toggle-layout': cycleLayout(); break;
+    case 'help': toggleHelp(); break;
   }
 });
 
@@ -522,9 +682,24 @@ btnOpen.addEventListener('click', openViaDialog);
 btnSave.addEventListener('click', saveActive);
 btnLayout.addEventListener('click', cycleLayout);
 btnNewTab.addEventListener('click', newTab);
+btnHelp.addEventListener('click', toggleHelp);
+
+// Escape closes the help overlay.
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !elHelpOverlay.hidden) hideHelp();
+});
 
 // --- Initial state ---------------------------------------------------------
 applyTheme(localStorage.getItem('theme') || 'light');
 if (localStorage.getItem('tocHidden') === '1') document.body.classList.add('toc-hidden');
 setLayout(localStorage.getItem('layout') || 'split');
+
+// Restore persisted pane sizes (clamped in case the window is now narrower).
+const savedTocW = parseFloat(localStorage.getItem('tocWidth'));
+if (Number.isFinite(savedTocW)) setTocWidth(savedTocW);
+const savedSplit = parseFloat(localStorage.getItem('splitPos'));
+if (Number.isFinite(savedSplit)) setSplitPos(savedSplit / 100);
+
+buildHelp();
+localizeShortcuts();
 showEmpty();

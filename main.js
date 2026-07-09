@@ -14,10 +14,19 @@ const watchDebounce = new Map(); // path -> timeout handle
 const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
 const FILE_FILTERS = [{ name: 'Markdown', extensions: MD_EXTS }];
 
+const REPO_URL = 'https://github.com/SWDesertPenguin/SMR';
+
 function isMarkdown(filePath) {
   if (typeof filePath !== 'string') return false;
   const ext = path.extname(filePath).slice(1).toLowerCase();
   return MD_EXTS.includes(ext);
+}
+
+// Open http(s)/mailto links in the system browser; ignore anything else.
+function openExternalUrl(url) {
+  if (typeof url === 'string' && /^(https?:|mailto:)/.test(url)) {
+    shell.openExternal(url);
+  }
 }
 
 function createWindow() {
@@ -41,19 +50,14 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   // Open external links in the system browser instead of replacing the app.
-  const openExternal = (url) => {
-    if (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:')) {
-      shell.openExternal(url);
-    }
-  };
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    openExternal(url);
+    openExternalUrl(url);
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url !== mainWindow.webContents.getURL()) {
       event.preventDefault();
-      openExternal(url);
+      openExternalUrl(url);
     }
   });
 
@@ -257,6 +261,8 @@ ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
   return ['save', 'discard', 'cancel'][response];
 });
 
+ipcMain.handle('shell:open-external', (_evt, url) => openExternalUrl(url));
+
 ipcMain.on('app:dirty', (_evt, n) => {
   dirtyCount = Number(n) || 0;
 });
@@ -274,13 +280,18 @@ function sendMenuAction(action) {
   if (mainWindow) mainWindow.webContents.send('menu:action', action);
 }
 
-function showAbout() {
-  dialog.showMessageBox(mainWindow, {
+async function showAbout() {
+  const mod = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+  const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'About SMR',
-    message: 'SMR — Standalone Markdown Reader & Editor',
-    detail: 'A simple desktop Markdown reader and editor.\nOpen files with Ctrl+O, edit them side-by-side, and save with Ctrl+S.'
+    message: `SMR — Standalone Markdown Reader & Editor  (v${app.getVersion()})`,
+    detail: `A simple desktop Markdown reader and editor.\nOpen files with ${mod}+O, edit them side-by-side, and save with ${mod}+S.`,
+    buttons: ['OK', 'View on GitHub'],
+    defaultId: 0,
+    cancelId: 0
   });
+  if (response === 1) openExternalUrl(REPO_URL);
 }
 
 function buildMenu() {
@@ -333,8 +344,14 @@ function buildMenu() {
       ]
     },
     {
-      label: 'Help',
-      submenu: [{ label: 'About SMR', click: showAbout }]
+      role: 'help',
+      submenu: [
+        { label: 'Help & Keyboard Shortcuts', accelerator: 'CmdOrCtrl+/', click: () => sendMenuAction('help') },
+        { label: 'SMR on GitHub', click: () => openExternalUrl(REPO_URL) },
+        { label: 'Report an Issue', click: () => openExternalUrl(`${REPO_URL}/issues`) },
+        { type: 'separator' },
+        { label: 'About SMR', click: showAbout }
+      ]
     }
   ];
 

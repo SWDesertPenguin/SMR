@@ -1,6 +1,6 @@
 # SMR — Standalone Markdown Reader & Editor
 
-A simple desktop Markdown reader and editor built with Electron. Open one or more `.md` files in tabs, edit them with a live side-by-side preview, and read them with clean styling, syntax-highlighted code, a table of contents, and a dark mode. SMR works with Markdown files only. This file doubles as a sample document for testing the app.
+A simple desktop Markdown reader and editor built with Electron, for Windows and macOS. Open one or more `.md` files in tabs, edit them with a live side-by-side preview, and read them with clean styling, syntax-highlighted code, a table of contents, and a dark mode. SMR works with Markdown files only. This file doubles as a sample document for testing the app.
 
 ## Getting started
 
@@ -9,12 +9,16 @@ npm install
 npm start
 ```
 
-Then open a file with **File → Open…** (`Ctrl+O`), start a new one with `Ctrl+N`, or drag `.md` files onto the window. Edit on the left, watch the preview update on the right, and save with `Ctrl+S`.
+Then open a file with **File → Open…** (`Ctrl+O` / `⌘O`), start a new one with `Ctrl+N`, or drag `.md` files onto the window. Edit on the left, watch the preview update on the right, and save with `Ctrl+S`. New to the app? Press the **?** button in the toolbar (or **Help → Help & Keyboard Shortcuts**) for a quick tour.
+
+macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that way throughout.
 
 ## Features
 
 - Multiple files open at once as tabs, with per-tab undo and unsaved-change markers
 - Edit Markdown with a live preview that updates as you type
+- Resizable panes: drag the dividers to size the contents list and the editor/preview split; sizes are remembered
+- Synchronized scrolling in split view — scroll either side and the other follows
 - Cycle the layout (`Ctrl+E`) between split, preview-only, and editor-only
 - Save (`Ctrl+S`) and Save As (`Ctrl+Shift+S`); new files default to a `.md` name
 - Open via menu, drag-and-drop, or a file path argument — Markdown files only
@@ -23,6 +27,7 @@ Then open a file with **File → Open…** (`Ctrl+O`), start a new one with `Ctr
 - Collapsible table of contents (`Ctrl+T`) that tracks your scroll position
 - Dark mode toggle (`Ctrl+D`), remembered between sessions
 - Live re-render when an open file changes on disk; conflicting external edits are flagged instead of overwriting your changes
+- Runs on Windows and macOS, with platform-correct keyboard shortcuts
 
 ## Keyboard shortcuts
 
@@ -38,6 +43,19 @@ Then open a file with **File → Open…** (`Ctrl+O`), start a new one with `Ctr
 | Cycle layout         | `Ctrl+E`         |
 | Toggle dark mode     | `Ctrl+D`         |
 | Toggle contents      | `Ctrl+T`         |
+| Help                 | `Ctrl+/`         |
+
+On macOS use `⌘` in place of `Ctrl`.
+
+## Building
+
+```bash
+npm run dist          # installers for the current platform
+npm run dist:portable # Windows portable .exe
+npm run dist:mac      # macOS .dmg and .zip (must be run on macOS)
+```
+
+macOS builds produce universal `x64` + `arm64` artifacts and must be built on a Mac; the app itself is unsigned, so first launch needs a right-click → Open.
 
 ## Task list
 

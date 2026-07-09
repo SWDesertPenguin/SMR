@@ -24,6 +24,12 @@ function highlight(code, lang) {
 
 // Minimal, explicit API surface for the renderer. No direct fs/ipc exposure.
 contextBridge.exposeInMainWorld('md', {
+  // Host platform, so the renderer can show ⌘ vs Ctrl and adapt copy.
+  platform: process.platform,
+
+  // Open an external URL (e.g. the project's GitHub page) in the system browser.
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+
   // Markdown → sanitized HTML string.
   parse: (markdown) => DOMPurify.sanitize(marked.parse(markdown), { ADD_ATTR: ['target'] }),
 

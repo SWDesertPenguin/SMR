@@ -1,5 +1,9 @@
 /* ---- Theme variables ---------------------------------------------------- */
 :root {
+  /* Layout sizing (overridable at runtime by the resize gutters). */
+  --toc-width: 260px;
+  --split-pos: 50%;
+
   --bg: #ffffff;
   --bg-alt: #f6f8fa;
   --topbar-bg: #f6f8fa;
@@ -168,15 +172,55 @@ body.no-tabs #tabbar { display: none; }
 body.no-tabs #body { padding-top: 44px; }
 
 #toc {
-  width: 260px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
+  width: var(--toc-width);
+  flex: 0 0 auto;
+  min-width: 0;
   background: var(--bg-alt);
   overflow-y: auto;
   padding: 16px 8px 32px;
 }
 body.toc-hidden #toc,
 body.no-tabs #toc { display: none; }
+
+/* ---- Resize gutters ----------------------------------------------------- */
+/* Draggable dividers. Each is a thin strip that widens its hit area with a
+   transparent overlay so it's easy to grab without eating layout width. */
+.gutter {
+  flex: 0 0 5px;
+  align-self: stretch;
+  background: var(--border);
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+}
+.gutter::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: -3px; right: -3px; /* invisible 11px-wide grab zone */
+}
+.gutter:hover,
+.gutter.dragging { background: var(--accent); }
+
+/* #gutter-toc mirrors #toc visibility; #gutter-split only exists in split view. */
+body.toc-hidden #gutter-toc,
+body.no-tabs #gutter-toc { display: none; }
+#gutter-split { display: none; }
+body.layout-split:not(.no-tabs) #gutter-split { display: block; }
+
+/* While dragging, force the resize cursor everywhere and kill text selection. */
+body.resizing { cursor: col-resize; }
+body.resizing * { cursor: col-resize !important; user-select: none !important; }
+
+/* The editor + preview panes live in a flex row so the split gutter divides
+   exactly that region (not the whole body, which also holds the TOC). */
+#panes {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
 
 .toc-title {
   font-size: 11px;
@@ -246,11 +290,14 @@ body.no-tabs #toc { display: none; }
   position: relative;
 }
 
-body.layout-split #preview-pane { border-left: 1px solid var(--border); }
+/* In split view the editor takes an adjustable slice and the preview fills the
+   rest; the gutter between them is the visible divider. */
+body.layout-split #editor-pane { flex: 0 0 var(--split-pos); }
 body.layout-preview #editor-pane { display: none; }
 body.layout-editor #preview-pane { display: none; }
 body.no-tabs #editor-pane,
-body.no-tabs #preview-pane { display: none; }
+body.no-tabs #preview-pane,
+body.no-tabs #panes { display: none; }
 
 /* ---- Empty state -------------------------------------------------------- */
 #empty-state {
@@ -388,3 +435,85 @@ body.no-tabs #empty-state { display: flex; }
   font-size: 20px;
   font-weight: 600;
 }
+
+/* ---- Help overlay ------------------------------------------------------- */
+#help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+#help-overlay[hidden] { display: none; }
+
+.help-card {
+  position: relative;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  width: min(680px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 28px 32px 24px;
+}
+.help-card h2 { margin: 0 0 4px; font-size: 20px; }
+.help-card h3 {
+  margin: 22px 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.help-card p { margin: 0 0 8px; line-height: 1.55; }
+.help-card code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 85%;
+  background: var(--code-bg);
+  padding: .15em .4em;
+  border-radius: 5px;
+}
+.help-list { margin: 0; padding-left: 20px; line-height: 1.6; }
+.help-list li { margin: 4px 0; }
+
+.help-shortcuts { border-collapse: collapse; width: 100%; }
+.help-shortcuts td { padding: 5px 0; vertical-align: middle; }
+.help-shortcuts td:first-child { color: var(--text-muted); }
+.help-shortcuts td:last-child { text-align: right; white-space: nowrap; }
+.help-shortcuts kbd {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.help-foot {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.help-foot a { color: var(--link); text-decoration: none; font-weight: 600; }
+.help-foot a:hover { text-decoration: underline; }
+
+.help-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.help-close:hover { background: var(--bg-alt); color: var(--text); }

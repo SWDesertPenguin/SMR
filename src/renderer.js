@@ -404,6 +404,23 @@ function syncDirty() {
   }
 }
 
+// Main intercepted a window close because tabs are unsaved. Offer one Save All /
+// Don't Save / Cancel choice, reuse the per-tab save path, then let main proceed.
+async function handleQuitRequested() {
+  const dirty = tabs.filter(isDirty);
+  if (dirty.length === 0) { window.md.forceQuit(); return; }
+  const choice = await window.md.confirmQuit(dirty.length);
+  if (choice === 'cancel') return;
+  if (choice === 'save') {
+    for (const tab of dirty) {
+      switchTab(tab.id); // surface the tab a Save As dialog would target
+      const ok = await saveTab(tab);
+      if (!ok) return; // a save was cancelled or failed → abort the quit
+    }
+  }
+  window.md.forceQuit();
+}
+
 // --- Theme -----------------------------------------------------------------
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
@@ -481,6 +498,7 @@ window.addEventListener('drop', async (e) => {
 // --- Wire up IPC + controls ------------------------------------------------
 window.md.onOpenTabs((list) => { (list || []).forEach(openFile); });
 window.md.onFileChanged(onFileChanged);
+window.md.onQuitRequested(handleQuitRequested);
 window.md.onMenuAction((action) => {
   switch (action) {
     case 'new': newTab(); break;

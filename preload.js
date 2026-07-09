@@ -47,10 +47,14 @@ contextBridge.exposeInMainWorld('md', {
   read: (filePath) => ipcRenderer.invoke('file:read', filePath),
   setWatched: (paths) => ipcRenderer.invoke('watch:set', paths),
   confirmClose: (name) => ipcRenderer.invoke('dialog:confirm-close', name),
+  confirmQuit: (n) => ipcRenderer.invoke('dialog:confirm-quit', n),
 
   // Renderer → main: keep the main process's unsaved-count mirror in sync so the
   // window-close handler can decide synchronously.
   notifyDirty: (n) => ipcRenderer.send('app:dirty', n),
+
+  // Renderer → main: the quit flow finished; proceed with closing the window.
+  forceQuit: () => ipcRenderer.send('app:force-quit'),
 
   // Main → renderer: open one or more files (launch arg, file association, recent).
   onOpenTabs: (cb) => {
@@ -60,6 +64,11 @@ contextBridge.exposeInMainWorld('md', {
   // Main → renderer: a watched file changed on disk.
   onFileChanged: (cb) => {
     ipcRenderer.on('file:changed', (_evt, payload) => cb(payload));
+  },
+
+  // Main → renderer: the window is closing with unsaved tabs; run the quit flow.
+  onQuitRequested: (cb) => {
+    ipcRenderer.on('app:quit-requested', () => cb());
   },
 
   // Main → renderer: a menu item was activated.

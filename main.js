@@ -15,11 +15,13 @@ const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
 const FILE_FILTERS = [{ name: 'Markdown', extensions: MD_EXTS }];
 
 function isMarkdown(filePath) {
+  if (typeof filePath !== 'string') return false;
   const ext = path.extname(filePath).slice(1).toLowerCase();
   return MD_EXTS.includes(ext);
 }
 
 function createWindow() {
+  forceClose = false; // a fresh window starts with no pending force-quit
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -55,20 +57,14 @@ function createWindow() {
     }
   });
 
-  // Intercept close so unsaved tabs get a confirmation. dirtyCount is kept in sync
-  // by the renderer (app:dirty), which lets this stay synchronous.
+  // Intercept close when tabs are unsaved. dirtyCount (mirrored from the renderer
+  // via app:dirty) lets us decide synchronously whether to intercept at all; the
+  // renderer then drives the Save All / Don't Save / Cancel flow and calls back
+  // via app:force-quit so it can reuse the same save logic the tabs already use.
   mainWindow.on('close', (event) => {
     if (forceClose || dirtyCount === 0) return;
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      type: 'warning',
-      buttons: ['Quit Without Saving', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      message: 'You have unsaved changes.',
-      detail: `${dirtyCount} file(s) have unsaved changes. Quit without saving?`
-    });
-    if (choice === 0) forceClose = true;
-    else event.preventDefault();
+    event.preventDefault();
+    if (mainWindow) mainWindow.webContents.send('app:quit-requested');
   });
 
   mainWindow.on('closed', () => {
@@ -131,7 +127,10 @@ function startWatching(filePath) {
       if (prev) clearTimeout(prev);
       watchDebounce.set(filePath, setTimeout(() => {
         watchDebounce.delete(filePath);
-        if (!fs.existsSync(filePath)) return; // removed; leave the tab alone
+        if (!fs.existsSync(filePath)) {
+          stopWatching(filePath); // gone for good; drop the stale watcher
+          return;                 // leave the tab alone
+        }
         try {
           const content = fs.readFileSync(filePath, 'utf8');
           if (mainWindow) mainWindow.webContents.send('file:changed', { path: filePath, content });
@@ -188,7 +187,10 @@ ipcMain.handle('file:open-path', (_evt, filePath) => {
   return r;
 });
 
+// Same md-only invariant as readForTab: never read or write a non-Markdown path,
+// even though the renderer only ever passes paths it already opened.
 ipcMain.handle('file:read', (_evt, filePath) => {
+  if (!isMarkdown(filePath)) return { error: `Not a Markdown file: ${filePath}` };
   try {
     return { content: fs.readFileSync(filePath, 'utf8') };
   } catch (err) {
@@ -197,6 +199,7 @@ ipcMain.handle('file:read', (_evt, filePath) => {
 });
 
 ipcMain.handle('file:save', (_evt, { path: filePath, content }) => {
+  if (!isMarkdown(filePath) || typeof content !== 'string') return { error: 'Invalid save request' };
   try {
     fs.writeFileSync(filePath, content, 'utf8');
     return { ok: true };
@@ -242,8 +245,27 @@ ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
   return ['save', 'discard', 'cancel'][response];
 });
 
+ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Save All', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    message: 'You have unsaved changes.',
+    detail: `${n} file(s) have unsaved changes. Save before quitting?`
+  });
+  return ['save', 'discard', 'cancel'][response];
+});
+
 ipcMain.on('app:dirty', (_evt, n) => {
   dirtyCount = Number(n) || 0;
+});
+
+// The renderer has finished its save/discard decision and wants to quit. Setting
+// forceClose makes the close handler above fall through on the re-close.
+ipcMain.on('app:force-quit', () => {
+  forceClose = true;
+  if (mainWindow) mainWindow.close();
 });
 
 // --- Application menu ----------------------------------------------------

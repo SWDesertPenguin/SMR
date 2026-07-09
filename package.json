@@ -1,6 +1,6 @@
 {
   "name": "smr",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "SMR (Standalone Markdown Reader): a simple desktop Markdown reader and editor with tabs",
   "main": "main.js",
   "scripts": {
@@ -24,6 +24,13 @@
   "build": {
     "appId": "com.smr.app",
     "productName": "SMR",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "SWDesertPenguin",
+        "repo": "SMR"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",
@@ -46,16 +53,38 @@
     "win": {
       "icon": "icon-dark.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "mac": {
       "icon": "icon-dark.png",
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
     "dmg": {

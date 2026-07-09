@@ -2,6 +2,9 @@
 // (window.md) so the renderer needs no Node modules of its own. This file owns
 // all tab/editor state; the main process is a stateless file service.
 
+// Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol } from './pure.mjs';
+
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
 const elFilename = document.getElementById('filename');
@@ -48,10 +51,6 @@ function getActiveTab() {
 // comparison is EOL-agnostic and a freshly opened CRLF file is not "dirty".
 function isDirty(tab) {
   return tab.el.value !== tab.saved;
-}
-
-function toEol(text, eol) {
-  return eol === '\r\n' ? text.replace(/\n/g, '\r\n') : text;
 }
 
 // --- Slugs + rendering -----------------------------------------------------
@@ -157,13 +156,6 @@ function scheduleRender() {
 // so a no-op set can't leave a lock stuck and swallow a later real scroll.
 let lockEditor = false;
 let lockPreview = false;
-
-function proportional(src, dst) {
-  const srcMax = src.scrollHeight - src.clientHeight;
-  const dstMax = dst.scrollHeight - dst.clientHeight;
-  if (srcMax <= 0 || dstMax <= 0) return null;
-  return (src.scrollTop / srcMax) * dstMax;
-}
 
 // Scroll `el` without triggering a sync back to the other pane.
 function setScrollSilently(el, top) {
@@ -540,14 +532,13 @@ function initGutter(gutter, onDrag) {
 }
 
 function setTocWidth(px) {
-  const w = Math.round(Math.max(140, Math.min(px, window.innerWidth * 0.6)));
+  const w = clampTocWidth(px, window.innerWidth * 0.6);
   document.documentElement.style.setProperty('--toc-width', `${w}px`);
   localStorage.setItem('tocWidth', String(w));
 }
 
 function setSplitPos(fraction) {
-  const f = Math.max(0.15, Math.min(fraction, 0.85));
-  const pct = `${(f * 100).toFixed(2)}%`;
+  const pct = `${(clampSplitFraction(fraction) * 100).toFixed(2)}%`;
   document.documentElement.style.setProperty('--split-pos', pct);
   localStorage.setItem('splitPos', pct);
 }
@@ -576,19 +567,11 @@ const SHORTCUTS = [
   ['Toggle contents', 'MOD+T']
 ];
 
-function comboToHtml(combo) {
-  return combo
-    .replaceAll('MOD', MOD)
-    .split(' / ')
-    .map((part) => part.split('+').map((k) => `<kbd>${k}</kbd>`).join('+'))
-    .join(' / ');
-}
-
 function buildHelp() {
   const body = document.getElementById('help-shortcuts-body');
   if (body) {
     body.innerHTML = SHORTCUTS
-      .map(([label, combo]) => `<tr><td>${label}</td><td>${comboToHtml(combo)}</td></tr>`)
+      .map(([label, combo]) => `<tr><td>${label}</td><td>${comboToHtml(combo, MOD)}</td></tr>`)
       .join('');
   }
   const gh = document.getElementById('help-github');

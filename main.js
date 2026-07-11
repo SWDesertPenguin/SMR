@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
 
@@ -274,6 +275,89 @@ ipcMain.on('app:force-quit', () => {
   if (mainWindow) mainWindow.close();
 });
 
+// --- Auto-update -----------------------------------------------------------
+
+// Every GitHub release built by .github/workflows/release.yml ships a
+// latest.yml / latest-mac.yml feed alongside the installers; electron-updater
+// reads that feed to find newer *published* releases (drafts stay invisible
+// to it, matching that workflow's review-then-publish flow).
+let manualUpdateCheck = false; // only surface "up to date" / error dialogs when the user asked
+
+function initAutoUpdater() {
+  if (!app.isPackaged) return; // no update feed to read outside a real build
+  if (process.env.PORTABLE_EXECUTABLE_DIR) return; // portable build: nothing to install into
+
+  // Unsigned macOS builds fail Squirrel.Mac's signature check (see the
+  // release workflow's CSC_IDENTITY_AUTO_DISCOVERY note), so mac only checks
+  // for a newer version and points the user at the release page instead of
+  // downloading and installing it.
+  autoUpdater.autoDownload = process.platform === 'win32';
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    if (process.platform === 'win32') {
+      // Downloads silently in the background; 'update-downloaded' below prompts
+      // to restart. Only say something now if the user explicitly asked.
+      if (manualUpdateCheck) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          message: `SMR ${info.version} found`,
+          detail: "Downloading in the background. You'll be prompted to restart once it's ready."
+        });
+      }
+    } else {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        message: `SMR ${info.version} is available`,
+        detail: "Auto-install isn't supported on this platform yet. Download it from GitHub?",
+        buttons: ['View Release', 'Later'],
+        defaultId: 0,
+        cancelId: 1
+      }).then(({ response }) => {
+        if (response === 0) openExternalUrl(`${REPO_URL}/releases/latest`);
+      });
+    }
+    manualUpdateCheck = false;
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    if (manualUpdateCheck) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        message: "You're up to date",
+        detail: `SMR ${app.getVersion()} is the latest version.`
+      });
+    }
+    manualUpdateCheck = false;
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('auto-update check failed:', err);
+    if (manualUpdateCheck) dialog.showErrorBox('Update check failed', err.message);
+    manualUpdateCheck = false;
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      message: `SMR ${info.version} is ready to install`,
+      detail: 'Restart now to finish updating?',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
+  });
+
+  autoUpdater.checkForUpdates().catch(() => {}); // reported via the 'error' listener above
+}
+
+function checkForUpdatesManually() {
+  manualUpdateCheck = true;
+  autoUpdater.checkForUpdates().catch(() => {}); // reported via the 'error' listener above
+}
+
 // --- Application menu ----------------------------------------------------
 
 function sendMenuAction(action) {
@@ -350,6 +434,11 @@ function buildMenu() {
         { label: 'SMR on GitHub', click: () => openExternalUrl(REPO_URL) },
         { label: 'Report an Issue', click: () => openExternalUrl(`${REPO_URL}/issues`) },
         { type: 'separator' },
+        {
+          label: 'Check for Updates…',
+          enabled: app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR,
+          click: checkForUpdatesManually
+        },
         { label: 'About SMR', click: showAbout }
       ]
     }
@@ -363,6 +452,7 @@ function buildMenu() {
 app.whenReady().then(() => {
   buildMenu();
   createWindow();
+  initAutoUpdater();
 
   // If launched with a file path argument, open it once the renderer is ready.
   const fileArg = process.argv.find((a) => a !== '.' && isMarkdown(a));

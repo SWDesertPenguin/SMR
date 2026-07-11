@@ -39,7 +39,7 @@ function createWindow() {
     minHeight: 360,
     backgroundColor: '#ffffff',
     title: 'SMR',
-    icon: path.join(__dirname, 'icon-dark.png'),
+    icon: path.join(__dirname, process.platform === 'win32' ? 'icon-dark.ico' : 'icon-dark.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

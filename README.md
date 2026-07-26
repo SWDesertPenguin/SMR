@@ -60,7 +60,9 @@ npm run dist:linux    # Linux AppImage, .deb, and .rpm (must be run on Linux)
 
 macOS builds produce universal `x64` + `arm64` artifacts and must be built on a Mac; the app itself is unsigned, so first launch needs a right-click → Open.
 
-Linux builds produce `x64` artifacts and must be built on Linux. The `.rpm` target shells out to `rpmbuild`, so install it first (`sudo apt install rpm` on Debian/Ubuntu); AppImage and `.deb` need nothing extra. The AppImage is the portable option — `chmod +x` it and run it. All three formats update themselves in place, but `.deb` and `.rpm` ask for your password when installing an update, since `dpkg`/`rpm` do the work.
+Linux builds produce `x64` artifacts and must be built on Linux. The `.rpm` target shells out to `rpmbuild`, so install it first (`sudo apt install rpm` on Debian/Ubuntu); AppImage and `.deb` need nothing extra. The AppImage is the portable option — `chmod +x` it and run it. The `.deb` and `.rpm` install to `/opt/SMR` and add a `smr` command on your `PATH`.
+
+Updates install in place: the AppImage replaces itself silently, while `.deb` asks for your password because `dpkg` does the work. An unsigned `.rpm` update may be refused depending on your distro's package-verification policy, in which case reinstall from the release page.
 
 ## Task list
 

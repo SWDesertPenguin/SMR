@@ -554,13 +554,13 @@ async function handleQuitRequested() {
   const dirty = tabs.filter(isDirty);
   if (dirty.length === 0) { window.md.forceQuit(); return; }
   const choice = await window.md.confirmQuit(dirty.length);
-  if (choice === 'cancel') return;
+  if (choice === 'cancel') { window.md.cancelQuit(); return; }
   if (choice === 'save') {
     for (const tab of dirty) {
       if (!tabs.includes(tab)) continue; // dropped as a duplicate by an earlier Save As
       switchTab(tab.id); // surface the tab a Save As dialog would target
       const ok = await saveTab(tab);
-      if (!ok) return; // a save was cancelled or failed → abort the quit
+      if (!ok) { window.md.cancelQuit(); return; } // a save was cancelled or failed → abort the quit
     }
   }
   window.md.forceQuit();

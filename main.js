@@ -7,6 +7,7 @@ const { fileURLToPath } = require('url');
 let mainWindow = null;
 let forceClose = false;      // set true once the user confirms quitting with unsaved work
 let dirtyCount = 0;          // mirrored from the renderer so the close handler stays synchronous
+let pendingInstall = false;  // "Restart Now" was chosen with unsaved tabs; install once the quit flow finishes
 let rendererReady = false;   // true once the window's page has finished loading and can take tabs:open
 let pendingOpenPaths = [];   // files asked for before the window could show them (Finder launch, argv)
 
@@ -112,6 +113,8 @@ function createWindow() {
     stopAllWatching();
     mainWindow = null;
     rendererReady = false;
+    dirtyCount = 0; // the tabs went with the window; a stale count would block a later install
+    pendingInstall = false;
   });
 }
 
@@ -329,10 +332,23 @@ ipcMain.on('app:dirty', (_evt, n) => {
 });
 
 // The renderer has finished its save/discard decision and wants to quit. Setting
-// forceClose makes the close handler above fall through on the re-close.
+// forceClose makes the close handler above fall through on the re-close. If the
+// quit was started by "Restart Now", this is also the point where it is safe to
+// hand over to the installer.
 ipcMain.on('app:force-quit', () => {
   forceClose = true;
-  if (mainWindow) mainWindow.close();
+  if (pendingInstall) {
+    pendingInstall = false;
+    autoUpdater.quitAndInstall();
+  } else if (mainWindow) {
+    mainWindow.close();
+  }
+});
+
+// The user cancelled the Save All / Don't Save / Cancel prompt, or a save failed.
+// Drop the pending install so a later ordinary quit does not trigger it.
+ipcMain.on('app:quit-cancelled', () => {
+  pendingInstall = false;
 });
 
 // --- Auto-update -----------------------------------------------------------
@@ -406,7 +422,15 @@ function initAutoUpdater() {
       defaultId: 0,
       cancelId: 1
     }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall();
+      if (response !== 0) return;
+      // quitAndInstall() launches the installer without giving the dirty-tab
+      // prompt a chance to run, so route through the renderer's quit flow first.
+      if (dirtyCount > 0 && mainWindow) {
+        pendingInstall = true;
+        mainWindow.webContents.send('app:quit-requested');
+      } else {
+        autoUpdater.quitAndInstall();
+      }
     });
   });
 

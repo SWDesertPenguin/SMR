@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('md', {
   // Renderer → main: the quit flow finished; proceed with closing the window.
   forceQuit: () => ipcRenderer.send('app:force-quit'),
 
+  // Renderer → main: the quit flow was cancelled or a save failed; abandon any
+  // install that was waiting on it.
+  cancelQuit: () => ipcRenderer.send('app:quit-cancelled'),
+
   // Main → renderer: open one or more files (launch arg, file association, recent).
   onOpenTabs: (cb) => {
     ipcRenderer.on('tabs:open', (_evt, payload) => cb(payload));

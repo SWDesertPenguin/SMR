@@ -1,24 +1,4 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
-const { marked } = require('marked');
-const createDOMPurify = require('dompurify');
-const hljs = require('highlight.js/lib/common');
-
-// DOMPurify needs a DOM; the preload shares the renderer's window.
-const DOMPurify = createDOMPurify(window);
-
-function highlight(code, lang) {
-  if (lang && hljs.getLanguage(lang)) {
-    try {
-      return { value: hljs.highlight(code, { language: lang }).value, language: lang };
-    } catch (_) { /* fall through */ }
-  }
-  try {
-    const r = hljs.highlightAuto(code);
-    return { value: r.value, language: r.language || '' };
-  } catch (_) {
-    return { value: '', language: '' };
-  }
-}
 
 // Minimal, explicit API surface for the renderer. No direct fs/ipc exposure.
 contextBridge.exposeInMainWorld('md', {
@@ -27,12 +7,6 @@ contextBridge.exposeInMainWorld('md', {
 
   // Open an external URL (e.g. the project's GitHub page) in the system browser.
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
-
-  // Markdown → sanitized HTML string.
-  parse: (markdown) => DOMPurify.sanitize(marked.parse(markdown), { ADD_ATTR: ['target'] }),
-
-  // Syntax-highlight a code block → { value: html, language }.
-  highlight,
 
   // Resolve the absolute path of a dropped File object (replaces File.path).
   getPathForFile: (file) => {

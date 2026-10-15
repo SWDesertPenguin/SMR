@@ -43,7 +43,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // allow the preload to require marked/dompurify/highlight.js
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js')
     }
   });
@@ -156,7 +156,7 @@ function startWatching(filePath) {
 
 // Reconcile the watcher set to exactly the paths the renderer has open.
 function setWatched(paths) {
-  const wanted = new Set(paths.filter((p) => typeof p === 'string' && p));
+  const wanted = new Set(paths.filter((p) => typeof p === 'string' && p && isMarkdown(p)));
   for (const filePath of [...watchers.keys()]) {
     if (!wanted.has(filePath)) stopWatching(filePath);
   }
@@ -431,7 +431,7 @@ function buildMenu() {
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
-        { role: 'toggleDevTools' }
+        ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }])
       ]
     },
     {

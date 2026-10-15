@@ -49,9 +49,21 @@ export function makeSlugger() {
   };
 }
 
-// Apply the target end-of-line style to LF-normalized text before writing.
+// Collapse CRLF and lone CR to LF. A textarea does the same to its value, so
+// `saved` has to be normalized the same way or a lone-CR file opens dirty.
+export function normalizeEol(text) {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+// The end-of-line style to write back: CRLF if the file used any, else LF.
+export function detectEol(text) {
+  return /\r\n/.test(text) ? '\r\n' : '\n';
+}
+
+// Apply the target end-of-line style before writing. Idempotent, so text that
+// already contains CRLF is not turned into CRCRLF.
 export function toEol(text, eol) {
-  return eol === '\r\n' ? text.replace(/\n/g, '\r\n') : text;
+  return eol === '\r\n' ? text.replace(/\r?\n/g, '\r\n') : text;
 }
 
 // Split a leading UTF-8 byte-order mark off file content. A BOM left in the text

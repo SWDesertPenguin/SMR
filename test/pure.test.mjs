@@ -3,7 +3,7 @@
 // eyeball: proportional scroll mapping, size clamps, and shortcut rendering.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, stripBom, withBom } from '../src/pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, stripBom, withBom } from '../src/pure.mjs';
 
 test('proportional maps scroll fraction onto the other pane', () => {
   const src = { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 };
@@ -66,6 +66,30 @@ test('makeSlugger falls back to md-section for empty results', () => {
   const slug = makeSlugger();
   assert.equal(slug(''), 'md-section');
   assert.equal(slug('!!!'), 'md-section-1');
+});
+
+test('toEol is idempotent on text that is already CRLF', () => {
+  assert.equal(toEol('a\r\nb\r\nc', '\r\n'), 'a\r\nb\r\nc', 'CRLF is not doubled');
+  assert.equal(toEol('a\r\nb\nc', '\r\n'), 'a\r\nb\r\nc', 'mixed input comes out uniform');
+  assert.equal(toEol(toEol('a\nb', '\r\n'), '\r\n'), 'a\r\nb', 'applying twice equals applying once');
+  assert.equal(toEol('', '\r\n'), '', 'empty input');
+});
+
+test('normalizeEol collapses CRLF and lone CR to LF', () => {
+  assert.equal(normalizeEol('a\r\nb\r\nc'), 'a\nb\nc', 'CRLF');
+  assert.equal(normalizeEol('a\rb\rc'), 'a\nb\nc', 'lone CR');
+  assert.equal(normalizeEol('a\r\nb\rc\nd'), 'a\nb\nc\nd', 'mixed');
+  assert.equal(normalizeEol('a\n\rb'), 'a\n\nb', 'LF then CR stays two breaks');
+  assert.equal(normalizeEol('a\nb'), 'a\nb', 'LF is untouched');
+  assert.equal(normalizeEol(''), '', 'empty input');
+});
+
+test('detectEol reports CRLF only when the text contains it', () => {
+  assert.equal(detectEol('a\r\nb\r\n'), '\r\n', 'CRLF file');
+  assert.equal(detectEol('a\nb\n'), '\n', 'LF file');
+  assert.equal(detectEol('a\rb\r'), '\n', 'lone CR is written back as LF');
+  assert.equal(detectEol('a\nb\r\nc'), '\r\n', 'mixed with any CRLF counts as CRLF');
+  assert.equal(detectEol(''), '\n', 'empty input defaults to LF');
 });
 
 test('stripBom splits a leading BOM off and reports it', () => {

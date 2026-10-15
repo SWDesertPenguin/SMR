@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, stripBom, withBom } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, stripBom, withBom } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -250,7 +250,7 @@ elPreview.addEventListener('scroll', onPreviewScroll, { passive: true });
 // --- Tab creation / lifecycle ----------------------------------------------
 function makeTab({ path = null, name, content = '' }) {
   const { text, bom } = stripBom(content);
-  const norm = text.replace(/\r\n/g, '\n');
+  const norm = normalizeEol(text);
   const ta = document.createElement('textarea');
   ta.className = 'editor';
   ta.spellcheck = false;
@@ -263,7 +263,7 @@ function makeTab({ path = null, name, content = '' }) {
     name,
     saved: norm,
     bom,
-    eol: /\r\n/.test(text) ? '\r\n' : '\n',
+    eol: detectEol(text),
     el: ta,
     previewScroll: 0,
     previewStale: true,
@@ -500,8 +500,8 @@ async function reloadActive() {
 // when the file is being reloaded wholesale from disk.
 function applyExternal(tab, rawContent) {
   const { text, bom } = stripBom(rawContent);
-  const norm = text.replace(/\r\n/g, '\n');
-  tab.eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  const norm = normalizeEol(text);
+  tab.eol = detectEol(text);
   tab.bom = bom;
   tab.saved = norm;
   tab.conflict = false;
@@ -514,7 +514,7 @@ function applyExternal(tab, rawContent) {
 function onFileChanged(payload) {
   const tab = tabs.find((t) => t.path === payload.path);
   if (!tab) return;
-  const norm = stripBom(payload.content).text.replace(/\r\n/g, '\n');
+  const norm = normalizeEol(stripBom(payload.content).text);
   if (norm === tab.saved) return; // our own save, or a no-op write
   if (isDirty(tab)) {
     // External change collides with local edits — flag it, don't clobber.

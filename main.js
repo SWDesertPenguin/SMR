@@ -6,6 +6,8 @@ const path = require('path');
 let mainWindow = null;
 let forceClose = false;      // set true once the user confirms quitting with unsaved work
 let dirtyCount = 0;          // mirrored from the renderer so the close handler stays synchronous
+let rendererReady = false;   // true once the window's page has finished loading and can take tabs:open
+let pendingOpenPaths = [];   // files asked for before the window could show them (Finder launch, argv)
 
 const watchers = new Map();      // path -> fs.FSWatcher
 const watchDebounce = new Map(); // path -> timeout handle
@@ -50,6 +52,14 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
+  // tabs:open sent before the page loads is dropped (the renderer has not
+  // registered its listener yet), so queued paths are flushed once it has.
+  mainWindow.webContents.on('did-start-loading', () => { rendererReady = false; });
+  mainWindow.webContents.on('did-finish-load', () => {
+    rendererReady = true;
+    pendingOpenPaths.splice(0).forEach(pushOpen);
+  });
+
   // Open external links in the system browser instead of replacing the app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);
@@ -75,6 +85,7 @@ function createWindow() {
   mainWindow.on('closed', () => {
     stopAllWatching();
     mainWindow = null;
+    rendererReady = false;
   });
 }
 
@@ -106,6 +117,19 @@ function pushOpen(filePath) {
     return;
   }
   if (mainWindow) mainWindow.webContents.send('tabs:open', [r]);
+}
+
+// Open files now if the window can take them, otherwise queue them for the
+// did-finish-load flush. On macOS the app can outlive its last window, so a
+// request that arrives then also has to bring a window back.
+function openPaths(paths) {
+  if (paths.length === 0) return;
+  if (mainWindow && rendererReady) {
+    paths.forEach(pushOpen);
+    return;
+  }
+  pendingOpenPaths.push(...paths);
+  if (!mainWindow && app.isReady()) createWindow();
 }
 
 // --- Watching ------------------------------------------------------------
@@ -461,31 +485,28 @@ function buildMenu() {
 
 app.whenReady().then(() => {
   buildMenu();
-  createWindow();
-  initAutoUpdater();
 
   // If launched with a file path argument, open it once the renderer is ready.
+  // Queued ahead of createWindow() so it joins any paths open-file already
+  // collected on a Finder launch and everything opens from one window.
   const fileArg = process.argv.find((a) => a !== '.' && isMarkdown(a));
-  if (fileArg && fs.existsSync(fileArg)) {
-    mainWindow.webContents.once('did-finish-load', () => pushOpen(fileArg));
-  }
+  if (fileArg && fs.existsSync(fileArg)) pendingOpenPaths.push(fileArg);
+
+  createWindow();
+  initAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 }).catch((err) => console.error('startup failed:', err));
 
-// macOS: open file from Finder / file association.
+// macOS: open file from Finder / file association. On a Finder launch this fires
+// before 'ready', so the path is queued; the single whenReady handler above
+// creates the window and opens it. Creating a window here too gave two windows,
+// and closing the orphan nulled mainWindow and stopped every watcher.
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  if (mainWindow) {
-    pushOpen(filePath);
-  } else {
-    app.whenReady().then(() => {
-      createWindow();
-      mainWindow.webContents.once('did-finish-load', () => pushOpen(filePath));
-    }).catch((err) => console.error('open-file handling failed:', err));
-  }
+  openPaths([filePath]);
 });
 
 app.on('window-all-closed', () => {

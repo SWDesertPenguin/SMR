@@ -167,14 +167,19 @@ function setWatched(paths) {
 
 // --- IPC from renderer ---------------------------------------------------
 
+// Electron 43+ opens dialogs in Downloads unless defaultPath is set, so the last folder is kept here.
+let lastDialogDir;
+
 ipcMain.handle('dialog:open', async () => {
   if (!mainWindow) return { files: [] };
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
     title: 'Open Markdown File',
+    defaultPath: lastDialogDir,
     properties: ['openFile', 'multiSelections'],
     filters: FILE_FILTERS
   });
   if (canceled) return { files: [] };
+  lastDialogDir = path.dirname(filePaths[0]);
   const files = [];
   for (const p of filePaths) {
     const r = readForTab(p);
@@ -216,12 +221,14 @@ ipcMain.handle('file:save', (_evt, { path: filePath, content }) => {
 
 ipcMain.handle('dialog:save', async (_evt, { content, name }) => {
   if (!mainWindow) return { canceled: true };
+  const fileName = name || 'Untitled.md';
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
     title: 'Save Markdown File',
-    defaultPath: name || 'Untitled.md',
+    defaultPath: path.isAbsolute(fileName) ? fileName : path.join(lastDialogDir || '', fileName),
     filters: FILE_FILTERS
   });
   if (canceled || !filePath) return { canceled: true };
+  lastDialogDir = path.dirname(filePath);
   // Enforce a Markdown extension even if the user typed a bare name.
   const out = isMarkdown(filePath) ? filePath : `${filePath}.md`;
   try {

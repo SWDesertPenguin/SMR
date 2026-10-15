@@ -6,8 +6,6 @@ const hljs = require('highlight.js/lib/common');
 // DOMPurify needs a DOM; the preload shares the renderer's window.
 const DOMPurify = createDOMPurify(window);
 
-marked.setOptions({ gfm: true, breaks: false });
-
 function highlight(code, lang) {
   if (lang && hljs.getLanguage(lang)) {
     try {
@@ -41,7 +39,7 @@ contextBridge.exposeInMainWorld('md', {
     try {
       return webUtils.getPathForFile(file);
     } catch (_) {
-      return (file && file.path) || '';
+      return '';
     }
   },
 

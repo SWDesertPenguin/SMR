@@ -180,28 +180,48 @@ function stopAllWatching() {
   for (const filePath of [...watchers.keys()]) stopWatching(filePath);
 }
 
+const WATCH_DEBOUNCE_MS = 120;
+const GONE_RETRIES = 5;
+const GONE_RETRY_MS = 200;
+
+// Look at a watched file once the burst of events has settled. A save that
+// replaces the file leaves nothing at the path for a moment, so a miss is retried
+// before the file is reported gone. The pending timer lives in watchDebounce, so
+// a new event or stopWatching() cancels it.
+function scheduleCheck(filePath, eventType, delay, attempt) {
+  const prev = watchDebounce.get(filePath);
+  if (prev) clearTimeout(prev);
+  watchDebounce.set(filePath, setTimeout(() => {
+    watchDebounce.delete(filePath);
+    if (!fs.existsSync(filePath)) {
+      if (attempt < GONE_RETRIES) {
+        scheduleCheck(filePath, eventType, GONE_RETRY_MS, attempt + 1);
+        return;
+      }
+      // Gone for good: drop the stale watcher and tell the renderer so the tab
+      // can say so. A later save re-arms watching through watch:set.
+      stopWatching(filePath);
+      if (mainWindow) mainWindow.webContents.send('file:gone', { path: filePath });
+      return;
+    }
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      if (mainWindow) mainWindow.webContents.send('file:changed', { path: filePath, content });
+    } catch (_) { /* transient read error during save; ignore */ }
+    // Atomic saves replace the inode, and a file that vanished and came back is a
+    // new one, so in both cases the original watch is now stale.
+    if (eventType === 'rename' || attempt > 0) {
+      stopWatching(filePath);
+      if (fs.existsSync(filePath)) startWatching(filePath);
+    }
+  }, delay));
+}
+
 function startWatching(filePath) {
   try {
+    // Debounce: editors often fire several events per save.
     const w = fs.watch(filePath, (eventType) => {
-      // Debounce: editors often fire several events per save.
-      const prev = watchDebounce.get(filePath);
-      if (prev) clearTimeout(prev);
-      watchDebounce.set(filePath, setTimeout(() => {
-        watchDebounce.delete(filePath);
-        if (!fs.existsSync(filePath)) {
-          stopWatching(filePath); // gone for good; drop the stale watcher
-          return;                 // leave the tab alone
-        }
-        try {
-          const content = fs.readFileSync(filePath, 'utf8');
-          if (mainWindow) mainWindow.webContents.send('file:changed', { path: filePath, content });
-        } catch (_) { /* transient read error during save; ignore */ }
-        // Atomic saves replace the inode, so the original watch is now stale.
-        if (eventType === 'rename') {
-          stopWatching(filePath);
-          if (fs.existsSync(filePath)) startWatching(filePath);
-        }
-      }, 120));
+      scheduleCheck(filePath, eventType, WATCH_DEBOUNCE_MS, 0);
     });
     watchers.set(filePath, w);
   } catch (err) {

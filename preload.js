@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('md', {
     ipcRenderer.on('file:changed', (_evt, payload) => cb(payload));
   },
 
+  // Main → renderer: a watched file is gone from disk and the watcher was dropped.
+  onFileGone: (cb) => {
+    ipcRenderer.on('file:gone', (_evt, payload) => cb(payload));
+  },
+
   // Main → renderer: the window is closing with unsaved tabs; run the quit flow.
   onQuitRequested: (cb) => {
     ipcRenderer.on('app:quit-requested', () => cb());

@@ -1,6 +1,13 @@
-// Markdown parsing, sanitizing, and highlighting are provided by the preload
-// (window.md) so the renderer needs no Node modules of its own. This file owns
-// all tab/editor state; the main process is a stateless file service.
+// Markdown parsing, sanitizing, and highlighting run here as ES modules so the
+// preload can stay a pure IPC bridge in a sandboxed renderer (window.md). This
+// file owns all tab/editor state; the main process is a stateless file service.
+
+import { marked } from '../node_modules/marked/lib/marked.esm.js';
+import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
+// highlight.js's own es/ entry points re-export a CommonJS build, which a
+// browser can't load; the cdn-assets package ships the same common-language
+// set as a single self-contained ES module.
+import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
 import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol } from './pure.mjs';
@@ -66,11 +73,37 @@ function slugify(text) {
   return n === 0 ? base : `${base}-${n}`;
 }
 
+// Markdown → sanitized HTML string. Styles are dropped here (and blocked by the
+// CSP) so a document can't restyle the app chrome; `input` stays allowed for
+// GFM task-list checkboxes.
+function parseMarkdown(md) {
+  return DOMPurify.sanitize(marked.parse(md), {
+    ADD_ATTR: ['target'],
+    FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select'],
+    FORBID_ATTR: ['style']
+  });
+}
+
+// Syntax-highlight a code block → { value: html, language }.
+function highlight(code, lang) {
+  if (lang && hljs.getLanguage(lang)) {
+    try {
+      return { value: hljs.highlight(code, { language: lang }).value, language: lang };
+    } catch (_) { /* fall through */ }
+  }
+  try {
+    const r = hljs.highlightAuto(code);
+    return { value: r.value, language: r.language || '' };
+  } catch (_) {
+    return { value: '', language: '' };
+  }
+}
+
 function renderPreview(tab) {
   if (!tab) return;
   const keepScroll = elPreview.scrollTop;
   slugCounts.clear();
-  elContent.innerHTML = window.md.parse(tab.el.value);
+  elContent.innerHTML = parseMarkdown(tab.el.value);
   assignHeadingIds();
   highlightCodeBlocks();
   buildToc();
@@ -88,7 +121,7 @@ function highlightCodeBlocks() {
   elContent.querySelectorAll('pre code').forEach((block) => {
     const langClass = [...block.classList].find((c) => c.startsWith('language-'));
     const lang = langClass ? langClass.slice('language-'.length) : '';
-    const res = window.md.highlight(block.textContent, lang);
+    const res = highlight(block.textContent, lang);
     if (res.value) {
       block.innerHTML = res.value;
       block.classList.add('hljs');

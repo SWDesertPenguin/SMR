@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
+const { fileURLToPath } = require('url');
 
 let mainWindow = null;
 let forceClose = false;      // set true once the user confirms quitting with unsaved work
@@ -23,6 +24,31 @@ function isMarkdown(filePath) {
   if (typeof filePath !== 'string') return false;
   const ext = path.extname(filePath).slice(1).toLowerCase();
   return MD_EXTS.includes(ext);
+}
+
+// Linux .desktop entries launch us with the %U field code, so a file manager may
+// hand us `file:///home/u/notes.md` rather than a path. isMarkdown() would happily
+// accept that string while every fs call on it fails, so normalize first. Returns
+// '' for a URI we can't convert, which then fails the isMarkdown check.
+function toLocalPath(arg) {
+  if (typeof arg !== 'string') return '';
+  if (!arg.startsWith('file://')) return arg;
+  try {
+    return fileURLToPath(arg);
+  } catch (_) {
+    return '';
+  }
+}
+
+// Every existing Markdown file named in an argv, as absolute paths. Skips the
+// '.' app-dir argument of `electron .` and any flag, and keeps all matches so
+// `smr a.md b.md` opens both.
+function markdownArgs(argv, cwd) {
+  return argv
+    .map(toLocalPath)
+    .filter((a) => a && a !== '.' && !a.startsWith('-'))
+    .map((a) => path.resolve(cwd, a))
+    .filter((p) => isMarkdown(p) && fs.existsSync(p));
 }
 
 // Open http(s)/mailto links in the system browser; ignore anything else.
@@ -483,14 +509,29 @@ function buildMenu() {
 
 // --- App lifecycle -------------------------------------------------------
 
+// One running SMR owns the window and every watcher. A second launch (opening
+// another .md from the file manager, `smr b.md`) hands its files to that instance
+// through 'second-instance' and exits instead of opening a competing window.
+const gotInstanceLock = app.requestSingleInstanceLock();
+if (!gotInstanceLock) app.quit();
+
+app.on('second-instance', (_event, argv, cwd) => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+  // cwd is the second process's directory, which is what its relative args mean.
+  openPaths(markdownArgs(argv, cwd));
+});
+
 app.whenReady().then(() => {
+  if (!gotInstanceLock) return;
   buildMenu();
 
-  // If launched with a file path argument, open it once the renderer is ready.
-  // Queued ahead of createWindow() so it joins any paths open-file already
-  // collected on a Finder launch and everything opens from one window.
-  const fileArg = process.argv.find((a) => a !== '.' && isMarkdown(a));
-  if (fileArg && fs.existsSync(fileArg)) pendingOpenPaths.push(fileArg);
+  // Files named on the command line open once the renderer is ready. Queued
+  // ahead of createWindow() so they join any paths open-file already collected on
+  // a Finder launch and everything opens from one window.
+  pendingOpenPaths.push(...markdownArgs(process.argv, process.cwd()));
 
   createWindow();
   initAutoUpdater();

@@ -53,3 +53,15 @@ export function makeSlugger() {
 export function toEol(text, eol) {
   return eol === '\r\n' ? text.replace(/\n/g, '\r\n') : text;
 }
+
+// Split a leading UTF-8 byte-order mark off file content. A BOM left in the text
+// breaks the first heading and would be written back on every save, so the tab
+// keeps it as a flag and withBom() restores it when saving.
+export function stripBom(text) {
+  return text.charCodeAt(0) === 0xFEFF ? { text: text.slice(1), bom: true } : { text, bom: false };
+}
+
+// Re-attach the BOM that stripBom() removed. Never doubles an existing one.
+export function withBom(text, bom) {
+  return bom && text.charCodeAt(0) !== 0xFEFF ? `\uFEFF${text}` : text;
+}

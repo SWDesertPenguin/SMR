@@ -3,7 +3,7 @@
 // eyeball: proportional scroll mapping, size clamps, and shortcut rendering.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger } from '../src/pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, stripBom, withBom } from '../src/pure.mjs';
 
 test('proportional maps scroll fraction onto the other pane', () => {
   const src = { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 };
@@ -66,4 +66,26 @@ test('makeSlugger falls back to md-section for empty results', () => {
   const slug = makeSlugger();
   assert.equal(slug(''), 'md-section');
   assert.equal(slug('!!!'), 'md-section-1');
+});
+
+test('stripBom splits a leading BOM off and reports it', () => {
+  assert.deepEqual(stripBom('\uFEFF# Title\n'), { text: '# Title\n', bom: true });
+  assert.deepEqual(stripBom('# Title\n'), { text: '# Title\n', bom: false });
+  assert.deepEqual(stripBom(''), { text: '', bom: false }, 'empty input');
+  assert.deepEqual(stripBom('a\uFEFFb'), { text: 'a\uFEFFb', bom: false }, 'only a leading BOM counts');
+  assert.deepEqual(stripBom('\uFEFF\uFEFFx'), { text: '\uFEFFx', bom: true }, 'strips exactly one');
+});
+
+test('withBom restores the BOM only when it was present', () => {
+  assert.equal(withBom('# Title\n', true), '\uFEFF# Title\n');
+  assert.equal(withBom('# Title\n', false), '# Title\n');
+  assert.equal(withBom('\uFEFF# Title\n', true), '\uFEFF# Title\n', 'does not double an existing BOM');
+  assert.equal(withBom('', true), '\uFEFF', 'empty text still gets the BOM');
+});
+
+test('stripBom then withBom round-trips', () => {
+  for (const raw of ['\uFEFF# Title\n', '# Title\n', '']) {
+    const { text, bom } = stripBom(raw);
+    assert.equal(withBom(text, bom), raw);
+  }
 });

@@ -251,9 +251,12 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
   border-left-color: var(--toc-active);
   font-weight: 600;
 }
-.toc-h2 a { padding-left: 20px; }
-.toc-h3 a { padding-left: 32px; }
-.toc-h4 a { padding-left: 44px; }
+/* Prefixed with #toc-list so they outrank the `#toc-list a` padding above. */
+#toc-list .toc-h2 a { padding-left: 20px; }
+#toc-list .toc-h3 a { padding-left: 32px; }
+#toc-list .toc-h4 a { padding-left: 44px; }
+#toc-list .toc-h5 a { padding-left: 56px; }
+#toc-list .toc-h6 a { padding-left: 68px; }
 .toc-empty { color: var(--text-muted); font-size: 13px; padding: 4px 8px; }
 
 /* Editor + preview panes. Layout classes on <body> control which show. */

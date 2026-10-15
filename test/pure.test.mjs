@@ -3,7 +3,7 @@
 // eyeball: proportional scroll mapping, size clamps, and shortcut rendering.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol } from '../src/pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger } from '../src/pure.mjs';
 
 test('proportional maps scroll fraction onto the other pane', () => {
   const src = { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 };
@@ -44,4 +44,26 @@ test('comboToHtml substitutes the modifier and wraps keys in <kbd>', () => {
 test('toEol converts to CRLF only when requested', () => {
   assert.equal(toEol('a\nb\nc', '\r\n'), 'a\r\nb\r\nc', 'LF -> CRLF');
   assert.equal(toEol('a\nb\nc', '\n'), 'a\nb\nc', 'LF stays LF');
+});
+
+test('makeSlugger prefixes ids and keeps non-ASCII letters', () => {
+  const slug = makeSlugger();
+  assert.equal(slug('Café'), 'md-café');
+  assert.equal(slug('日本語'), 'md-日本語');
+  assert.equal(slug('Hello, World!'), 'md-hello-world');
+  assert.equal(slug('Body'), 'md-body', 'cannot collide with #body');
+});
+
+test('makeSlugger de-duplicates within one slugger and resets on a new one', () => {
+  const slug = makeSlugger();
+  assert.equal(slug('Foo'), 'md-foo');
+  assert.equal(slug('Foo'), 'md-foo-1');
+  assert.equal(slug('Foo'), 'md-foo-2');
+  assert.equal(makeSlugger()('Foo'), 'md-foo', 'fresh slugger starts over');
+});
+
+test('makeSlugger falls back to md-section for empty results', () => {
+  const slug = makeSlugger();
+  assert.equal(slug(''), 'md-section');
+  assert.equal(slug('!!!'), 'md-section-1');
 });

@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -60,18 +60,8 @@ function isDirty(tab) {
   return tab.el.value !== tab.saved;
 }
 
-// --- Slugs + rendering -----------------------------------------------------
-const slugCounts = new Map();
-function slugify(text) {
-  const base = text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-') || 'section';
-  const n = slugCounts.get(base) || 0;
-  slugCounts.set(base, n + 1);
-  return n === 0 ? base : `${base}-${n}`;
-}
+// --- Rendering -------------------------------------------------------------
+const HEADINGS = 'h1, h2, h3, h4, h5, h6';
 
 // Markdown → sanitized HTML string. Styles are dropped here (and blocked by the
 // CSP) so a document can't restyle the app chrome; `input` stays allowed for
@@ -99,20 +89,44 @@ function highlight(code, lang) {
   }
 }
 
+// Re-highlighting every block on each keystroke is the bulk of a render, and
+// most blocks don't change between renders, so memoize by language + source.
+const HIGHLIGHT_CACHE_MAX = 500;
+const highlightCache = new Map();
+function highlightCached(code, lang) {
+  const key = `${lang}\u0000${code}`;
+  let res = highlightCache.get(key);
+  if (!res) {
+    if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) highlightCache.clear();
+    res = highlight(code, lang);
+    highlightCache.set(key, res);
+  }
+  return res;
+}
+
 function renderPreview(tab) {
   if (!tab) return;
   const keepScroll = elPreview.scrollTop;
-  slugCounts.clear();
   elContent.innerHTML = parseMarkdown(tab.el.value);
   assignHeadingIds();
   highlightCodeBlocks();
   buildToc();
   observeHeadings();
   setScrollSilently(elPreview, keepScroll);
+  tab.previewStale = false;
+}
+
+// Render the active tab's preview if it is on screen; in editor-only layout the
+// pane is hidden, so just remember it is out of date for when it comes back.
+function refreshPreview(tab) {
+  if (!tab) return;
+  if (currentLayout === 'editor') tab.previewStale = true;
+  else renderPreview(tab);
 }
 
 function assignHeadingIds() {
-  elContent.querySelectorAll('h1, h2, h3, h4').forEach((h) => {
+  const slugify = makeSlugger();
+  elContent.querySelectorAll(HEADINGS).forEach((h) => {
     if (!h.id) h.id = slugify(h.textContent);
   });
 }
@@ -121,7 +135,7 @@ function highlightCodeBlocks() {
   elContent.querySelectorAll('pre code').forEach((block) => {
     const langClass = [...block.classList].find((c) => c.startsWith('language-'));
     const lang = langClass ? langClass.slice('language-'.length) : '';
-    const res = highlight(block.textContent, lang);
+    const res = highlightCached(block.textContent, lang);
     if (res.value) {
       block.innerHTML = res.value;
       block.classList.add('hljs');
@@ -132,7 +146,7 @@ function highlightCodeBlocks() {
 
 function buildToc() {
   elTocList.innerHTML = '';
-  const headings = elContent.querySelectorAll('h1, h2, h3, h4');
+  const headings = elContent.querySelectorAll(HEADINGS);
   if (headings.length === 0) {
     elTocList.innerHTML = '<li class="toc-empty">No headings</li>';
     return;
@@ -145,7 +159,7 @@ function buildToc() {
     a.href = `#${h.id}`;
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     li.appendChild(a);
     elTocList.appendChild(li);
@@ -168,17 +182,33 @@ const tocObserver = new IntersectionObserver(
 
 function observeHeadings() {
   tocObserver.disconnect();
-  elContent.querySelectorAll('h1, h2, h3, h4').forEach((h) => tocObserver.observe(h));
+  elContent.querySelectorAll(HEADINGS).forEach((h) => tocObserver.observe(h));
 }
+
+// In-document links (#fragment). Heading ids carry an "md-" prefix, so a plain
+// hash navigation wouldn't find them; resolve the fragment inside the preview.
+elContent.addEventListener('click', (e) => {
+  const a = e.target instanceof Element ? e.target.closest('a[href^="#"]') : null;
+  if (!a) return;
+  e.preventDefault();
+  let frag = a.getAttribute('href').slice(1);
+  try { frag = decodeURIComponent(frag); } catch (_) { /* keep the raw fragment */ }
+  if (!frag) return;
+  const target = elContent.querySelector(`#${CSS.escape(`md-${frag}`)}`)
+    || elContent.querySelector(`#${CSS.escape(frag)}`);
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 // Debounce live preview so fast typing doesn't re-parse on every keystroke.
 let renderTimer = null;
 function scheduleRender() {
   if (renderTimer) clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => {
+  if (currentLayout === 'editor') {
     const tab = getActiveTab();
-    if (tab) renderPreview(tab);
-  }, 150);
+    if (tab) tab.previewStale = true;
+    return;
+  }
+  renderTimer = setTimeout(() => refreshPreview(getActiveTab()), 150);
 }
 
 // --- Synchronized scrolling ------------------------------------------------
@@ -234,25 +264,35 @@ function makeTab({ path = null, name, content = '' }) {
     eol: /\r\n/.test(content) ? '\r\n' : '\n',
     el: ta,
     previewScroll: 0,
+    previewStale: true,
     conflict: false
   };
 
   ta.addEventListener('input', () => onEdit(tab));
   ta.addEventListener('keydown', (e) => handleEditorKeys(e, tab));
+  ta.addEventListener('blur', () => { tabPassThrough = false; });
   ta.addEventListener('scroll', () => onEditorScroll(ta), { passive: true });
   elEditors.appendChild(ta);
   tabs.push(tab);
   return tab;
 }
 
-// Tab key inserts two spaces at the caret rather than moving focus.
+// Tab key inserts two spaces at the caret rather than moving focus. Shift+Tab is
+// left alone, and Escape arms a one-shot escape hatch so the next Tab moves focus
+// out of the editor (otherwise keyboard users would be trapped in it).
+let tabPassThrough = false;
 function handleEditorKeys(e, tab) {
-  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+  if (e.key === 'Escape') { tabPassThrough = true; return; }
+  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+    if (tabPassThrough) { tabPassThrough = false; return; }
     e.preventDefault();
     const ta = tab.el;
     ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end');
     onEdit(tab);
+    return;
   }
+  // Any other real keypress disarms it; a bare modifier press doesn't count.
+  if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) tabPassThrough = false;
 }
 
 function onEdit(tab) {
@@ -294,29 +334,35 @@ async function closeTab(id) {
       if (!ok) return; // save dialog cancelled or write failed → keep the tab open
     }
   }
+  const idx = tabs.findIndex((t) => t.id === id);
+  const wasActive = activeId === id;
   tab.el.remove();
   tabs = tabs.filter((t) => t.id !== id);
-  if (activeId === id) {
-    const next = tabs[tabs.length - 1];
-    activeId = next ? next.id : null;
-  }
   afterTabsChange();
-  if (activeId) switchTab(activeId);
+  if (!wasActive) return;
+  // Hand off to the neighbor now sitting at the closed slot (or the last tab).
+  // Clearing activeId first keeps switchTab from saving the closed tab's scroll
+  // onto the wrong tab.
+  const next = tabs[idx] || tabs[tabs.length - 1];
+  activeId = null;
+  if (next) switchTab(next.id);
   else showEmpty();
 }
 
 function switchTab(id) {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
+  // The preview pane is display:none in editor layout, where scrollTop reads 0,
+  // so only record it while it is actually showing.
   const cur = getActiveTab();
-  if (cur && cur.id !== id) cur.previewScroll = elPreview.scrollTop;
+  if (cur && currentLayout !== 'editor') cur.previewScroll = elPreview.scrollTop;
 
   activeId = id;
   tabs.forEach((t) => { t.el.style.display = t.id === id ? 'block' : 'none'; });
 
   document.body.classList.remove('no-tabs');
-  renderPreview(tab);
-  setScrollSilently(elPreview, tab.previewScroll || 0);
+  refreshPreview(tab);
+  if (currentLayout !== 'editor') setScrollSilently(elPreview, tab.previewScroll || 0);
   updateActiveUi();
   renderTabBar();
   if (currentLayout !== 'preview') tab.el.focus();
@@ -456,7 +502,7 @@ function applyExternal(tab, rawContent) {
   tab.saved = norm;
   tab.conflict = false;
   tab.el.value = norm;
-  if (tab.id === activeId) renderPreview(tab);
+  if (tab.id === activeId) refreshPreview(tab);
   updateTabLabel(tab);
   syncDirty();
 }
@@ -526,11 +572,21 @@ const LAYOUTS = ['split', 'preview', 'editor'];
 let currentLayout = 'split';
 
 function setLayout(mode) {
+  const tab = getActiveTab();
+  const wasHidden = currentLayout === 'editor';
+  // Hiding the preview resets its scrollTop to 0, so bank the position first.
+  if (tab && !wasHidden && mode === 'editor') tab.previewScroll = elPreview.scrollTop;
+
   currentLayout = mode;
   document.body.classList.remove('layout-split', 'layout-preview', 'layout-editor');
   document.body.classList.add(`layout-${mode}`);
   localStorage.setItem('layout', mode);
-  const tab = getActiveTab();
+
+  // The preview is showing again: catch it up if edits landed while it was hidden.
+  if (tab && wasHidden && mode !== 'editor') {
+    if (tab.previewStale) renderPreview(tab);
+    setScrollSilently(elPreview, tab.previewScroll || 0);
+  }
   if (tab && mode !== 'preview') tab.el.focus();
 }
 
@@ -642,19 +698,30 @@ async function openViaDialog() {
 }
 
 // --- Drag and drop ---------------------------------------------------------
+// Only file drags are ours. Anything else (e.g. selected text dragged inside the
+// editor) must reach the browser untouched so native text drag-and-drop works.
+function isFileDrag(e) {
+  return Array.from(e.dataTransfer?.types || []).includes('Files');
+}
+
 let dragDepth = 0;
 window.addEventListener('dragenter', (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
   dragDepth++;
   elDropOverlay.classList.add('visible');
 });
-window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('dragover', (e) => {
+  if (isFileDrag(e)) e.preventDefault();
+});
 window.addEventListener('dragleave', (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
   dragDepth = Math.max(0, dragDepth - 1);
   if (dragDepth === 0) elDropOverlay.classList.remove('visible');
 });
 window.addEventListener('drop', async (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
   dragDepth = 0;
   elDropOverlay.classList.remove('visible');

@@ -469,12 +469,27 @@ async function saveTabAs(tab) {
     tab.name = res.name;
     tab.saved = text;
     tab.conflict = false;
+    const activeDropped = dropDuplicateTabs(tab);
     afterTabsChange(); // path changed → update watchers
+    if (activeDropped) switchTab(tab.id);
     updateTabLabel(tab);
     syncDirty();
     return true;
   }
   return false;
+}
+
+// Save As onto a path another tab already has open would leave two tabs on one
+// file. The file now holds `keep`'s text and the OS dialog already confirmed the
+// overwrite, so the other tabs are redundant: drop them. Returns true if the
+// active tab was among them, so the caller can re-select `keep`.
+function dropDuplicateTabs(keep) {
+  const dupes = tabs.filter((t) => t !== keep && samePath(t.path, keep.path, window.md.platform));
+  if (dupes.length === 0) return false;
+  const activeDropped = dupes.some((t) => t.id === activeId);
+  dupes.forEach((t) => t.el.remove());
+  tabs = tabs.filter((t) => !dupes.includes(t));
+  return activeDropped;
 }
 
 function saveActive() {
@@ -542,6 +557,7 @@ async function handleQuitRequested() {
   if (choice === 'cancel') return;
   if (choice === 'save') {
     for (const tab of dirty) {
+      if (!tabs.includes(tab)) continue; // dropped as a duplicate by an earlier Save As
       switchTab(tab.id); // surface the tab a Save As dialog would target
       const ok = await saveTab(tab);
       if (!ok) return; // a save was cancelled or failed → abort the quit

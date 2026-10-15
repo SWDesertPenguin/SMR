@@ -3,7 +3,7 @@
 // eyeball: proportional scroll mapping, size clamps, and shortcut rendering.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, stripBom, withBom } from '../src/pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom } from '../src/pure.mjs';
 
 test('proportional maps scroll fraction onto the other pane', () => {
   const src = { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 };
@@ -90,6 +90,20 @@ test('detectEol reports CRLF only when the text contains it', () => {
   assert.equal(detectEol('a\rb\r'), '\n', 'lone CR is written back as LF');
   assert.equal(detectEol('a\nb\r\nc'), '\r\n', 'mixed with any CRLF counts as CRLF');
   assert.equal(detectEol(''), '\n', 'empty input defaults to LF');
+});
+
+test('samePath ignores case on win32 only', () => {
+  assert.equal(samePath('C:\\Notes\\A.md', 'c:\\notes\\a.md', 'win32'), true, 'win32 is case-insensitive');
+  assert.equal(samePath('C:\\Notes\\A.md', 'C:\\Notes\\B.md', 'win32'), false, 'different files');
+  assert.equal(samePath('/home/u/A.md', '/home/u/a.md', 'linux'), false, 'linux is case-sensitive');
+  assert.equal(samePath('/Users/u/A.md', '/Users/u/a.md', 'darwin'), false, 'darwin compares exactly');
+  assert.equal(samePath('/home/u/a.md', '/home/u/a.md', 'linux'), true, 'identical paths');
+});
+
+test('samePath is false when either side is not a string', () => {
+  assert.equal(samePath(null, 'a.md', 'win32'), false);
+  assert.equal(samePath('a.md', undefined, 'linux'), false);
+  assert.equal(samePath(null, null, 'win32'), false, 'two untitled tabs are not the same file');
 });
 
 test('stripBom splits a leading BOM off and reports it', () => {

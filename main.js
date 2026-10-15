@@ -87,10 +87,13 @@ function readForTab(filePath) {
   if (!isMarkdown(filePath)) {
     return { error: `Not a Markdown file: ${path.basename(filePath)}` };
   }
+  // Resolve once here so every path the renderer sees is absolute and normalized;
+  // the renderer dedupes tabs and matches watcher events by comparing these.
+  const abs = path.resolve(filePath);
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    app.addRecentDocument(filePath);
-    return { path: filePath, name: path.basename(filePath), content };
+    const content = fs.readFileSync(abs, 'utf8');
+    app.addRecentDocument(abs);
+    return { path: abs, name: path.basename(abs), content };
   } catch (err) {
     return { error: err.message };
   }
@@ -230,7 +233,7 @@ ipcMain.handle('dialog:save', async (_evt, { content, name }) => {
   if (canceled || !filePath) return { canceled: true };
   lastDialogDir = path.dirname(filePath);
   // Enforce a Markdown extension even if the user typed a bare name.
-  const out = isMarkdown(filePath) ? filePath : `${filePath}.md`;
+  const out = path.resolve(isMarkdown(filePath) ? filePath : `${filePath}.md`);
   try {
     fs.writeFileSync(out, content, 'utf8');
     app.addRecentDocument(out);

@@ -66,6 +66,15 @@ export function toEol(text, eol) {
   return eol === '\r\n' ? text.replace(/\r?\n/g, '\r\n') : text;
 }
 
+// Whether two absolute paths name the same file. Windows paths are
+// case-insensitive, so `C:\Notes\A.md` and `c:\notes\a.md` are one tab there; every
+// other platform compares exactly. Main hands the renderer path.resolve()d paths,
+// so separators and `..` segments are already normalized.
+export function samePath(a, b, platform) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 // Split a leading UTF-8 byte-order mark off file content. A BOM left in the text
 // breaks the first heading and would be written back on every save, so the tab
 // keeps it as a flag and withBom() restores it when saving.

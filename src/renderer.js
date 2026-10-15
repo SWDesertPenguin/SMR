@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, stripBom, withBom } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -305,7 +305,7 @@ function onEdit(tab) {
 
 function openFile(data) {
   if (!data || typeof data.content !== 'string' || !data.path) return null;
-  const existing = tabs.find((t) => t.path === data.path);
+  const existing = tabs.find((t) => samePath(t.path, data.path, window.md.platform));
   if (existing) {
     switchTab(existing.id);
     return existing;
@@ -512,7 +512,7 @@ function applyExternal(tab, rawContent) {
 }
 
 function onFileChanged(payload) {
-  const tab = tabs.find((t) => t.path === payload.path);
+  const tab = tabs.find((t) => samePath(t.path, payload.path, window.md.platform));
   if (!tab) return;
   const norm = normalizeEol(stripBom(payload.content).text);
   if (norm === tab.saved) return; // our own save, or a no-op write

@@ -4,6 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { fileURLToPath } = require('url');
 
+// A rejected promise nobody handles would otherwise vanish; surface it in the log.
+process.on('unhandledRejection', (err) => console.error('unhandled rejection:', err));
+
 let mainWindow = null;
 let forceClose = false;      // set true once the user confirms quitting with unsaved work
 let dirtyCount = 0;          // mirrored from the renderer so the close handler stays synchronous
@@ -55,7 +58,7 @@ function markdownArgs(argv, cwd) {
 // Open http(s)/mailto links in the system browser; ignore anything else.
 function openExternalUrl(url) {
   if (typeof url === 'string' && /^(https?:|mailto:)/.test(url)) {
-    shell.openExternal(url);
+    shell.openExternal(url).catch((err) => console.error('openExternal failed:', err));
   }
 }
 
@@ -97,6 +100,14 @@ function createWindow() {
       event.preventDefault();
       openExternalUrl(url);
     }
+  });
+
+  // A dead renderer leaves a blank window with the user's tabs gone. Say why
+  // instead of failing silently, then reload so the window is usable again.
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('render-process-gone:', details);
+    dialog.showErrorBox('SMR stopped unexpectedly', `The window's process exited (${details.reason}). SMR will reload it; unsaved changes in open tabs are lost.`);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
   });
 
   // Intercept close when tabs are unsaved. dirtyCount (mirrored from the renderer
@@ -399,7 +410,7 @@ function initAutoUpdater() {
           type: 'info',
           message: `SMR ${info.version} found`,
           detail: "Downloading in the background. You'll be prompted to restart once it's ready."
-        });
+        }).catch(() => {});
       }
     } else {
       dialog.showMessageBox(mainWindow, {
@@ -411,7 +422,7 @@ function initAutoUpdater() {
         cancelId: 1
       }).then(({ response }) => {
         if (response === 0) openExternalUrl(`${REPO_URL}/releases/latest`);
-      });
+      }).catch(() => {});
     }
     manualUpdateCheck = false;
   });
@@ -422,7 +433,7 @@ function initAutoUpdater() {
         type: 'info',
         message: "You're up to date",
         detail: `SMR ${app.getVersion()} is the latest version.`
-      });
+      }).catch(() => {});
     }
     manualUpdateCheck = false;
   });
@@ -451,7 +462,7 @@ function initAutoUpdater() {
       } else {
         autoUpdater.quitAndInstall();
       }
-    });
+    }).catch(() => {});
   });
 
   autoUpdater.checkForUpdates().catch(() => {}); // reported via the 'error' listener above
@@ -583,7 +594,11 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-}).catch((err) => console.error('startup failed:', err));
+}).catch((err) => {
+  console.error('startup failed:', err);
+  dialog.showErrorBox('SMR failed to start', String(err));
+  app.exit(1);
+});
 
 // macOS: open file from Finder / file association. On a Finder launch this fires
 // before 'ready', so the path is queued; the single whenReady handler above

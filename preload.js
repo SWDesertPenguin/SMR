@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('md', {
   // Renderer → main: the quit flow finished; proceed with closing the window.
   forceQuit: () => ipcRenderer.send('app:force-quit'),
 
+  // Renderer → main: the quit flow was cancelled or a save failed; abandon any
+  // install that was waiting on it.
+  cancelQuit: () => ipcRenderer.send('app:quit-cancelled'),
+
   // Main → renderer: open one or more files (launch arg, file association, recent).
   onOpenTabs: (cb) => {
     ipcRenderer.on('tabs:open', (_evt, payload) => cb(payload));
@@ -42,6 +46,11 @@ contextBridge.exposeInMainWorld('md', {
   // Main → renderer: a watched file changed on disk.
   onFileChanged: (cb) => {
     ipcRenderer.on('file:changed', (_evt, payload) => cb(payload));
+  },
+
+  // Main → renderer: a watched file is gone from disk and the watcher was dropped.
+  onFileGone: (cb) => {
+    ipcRenderer.on('file:gone', (_evt, payload) => cb(payload));
   },
 
   // Main → renderer: the window is closing with unsaved tabs; run the quit flow.

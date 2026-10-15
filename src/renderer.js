@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -249,7 +249,8 @@ elPreview.addEventListener('scroll', onPreviewScroll, { passive: true });
 
 // --- Tab creation / lifecycle ----------------------------------------------
 function makeTab({ path = null, name, content = '' }) {
-  const norm = content.replace(/\r\n/g, '\n');
+  const { text, bom } = stripBom(content);
+  const norm = normalizeEol(text);
   const ta = document.createElement('textarea');
   ta.className = 'editor';
   ta.spellcheck = false;
@@ -261,11 +262,13 @@ function makeTab({ path = null, name, content = '' }) {
     path,
     name,
     saved: norm,
-    eol: /\r\n/.test(content) ? '\r\n' : '\n',
+    bom,
+    eol: detectEol(text),
     el: ta,
     previewScroll: 0,
     previewStale: true,
-    conflict: false
+    conflict: false,
+    missing: false // the file was deleted on disk; set by main's file:gone
   };
 
   ta.addEventListener('input', () => onEdit(tab));
@@ -303,7 +306,7 @@ function onEdit(tab) {
 
 function openFile(data) {
   if (!data || typeof data.content !== 'string' || !data.path) return null;
-  const existing = tabs.find((t) => t.path === data.path);
+  const existing = tabs.find((t) => samePath(t.path, data.path, window.md.platform));
   if (existing) {
     switchTab(existing.id);
     return existing;
@@ -397,7 +400,7 @@ function renderTabBar() {
     el.dataset.id = String(tab.id);
     el.classList.toggle('active', tab.id === activeId);
     el.classList.toggle('conflict', tab.conflict);
-    el.title = tab.conflict ? `${tab.path || tab.name} — changed on disk` : (tab.path || tab.name);
+    el.title = tabTooltip(tab);
 
     const name = document.createElement('span');
     name.className = 'tab-name';
@@ -419,10 +422,18 @@ function renderTabBar() {
   });
 }
 
+// Hover text for a tab: where it lives, plus what is wrong with it on disk.
+function tabTooltip(tab) {
+  const where = tab.path || tab.name;
+  if (tab.missing) return `${where} — deleted on disk`;
+  return tab.conflict ? `${where} — changed on disk` : where;
+}
+
 function updateTabLabel(tab) {
   const el = elTabs.querySelector(`.tab[data-id="${tab.id}"]`);
   if (el) {
     el.classList.toggle('conflict', tab.conflict);
+    el.title = tabTooltip(tab);
     const name = el.querySelector('.tab-name');
     if (name) name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
   }
@@ -447,10 +458,15 @@ function cycleTab(dir) {
 async function saveTab(tab) {
   if (!tab.path) return saveTabAs(tab);
   const text = tab.el.value;
-  const res = await window.md.save(tab.path, toEol(text, tab.eol));
+  const res = await window.md.save(tab.path, toEol(withBom(text, tab.bom), tab.eol));
   if (res && res.ok) {
+    const wasMissing = tab.missing;
     tab.saved = text;
     tab.conflict = false;
+    tab.missing = false;
+    // The save recreated the file; main dropped its watcher when it went missing
+    // and setWatched only starts watchers for paths it is not already watching.
+    if (wasMissing) afterTabsChange();
     updateTabLabel(tab);
     syncDirty();
     return true;
@@ -461,18 +477,34 @@ async function saveTab(tab) {
 async function saveTabAs(tab) {
   const text = tab.el.value;
   const suggested = tab.path || (tab.name.endsWith('.md') ? tab.name : `${tab.name}.md`);
-  const res = await window.md.saveDialog(toEol(text, tab.eol), suggested);
+  const res = await window.md.saveDialog(toEol(withBom(text, tab.bom), tab.eol), suggested);
   if (res && res.path) {
     tab.path = res.path;
     tab.name = res.name;
     tab.saved = text;
     tab.conflict = false;
+    tab.missing = false;
+    const activeDropped = dropDuplicateTabs(tab);
     afterTabsChange(); // path changed → update watchers
+    if (activeDropped) switchTab(tab.id);
     updateTabLabel(tab);
     syncDirty();
     return true;
   }
   return false;
+}
+
+// Save As onto a path another tab already has open would leave two tabs on one
+// file. The file now holds `keep`'s text and the OS dialog already confirmed the
+// overwrite, so the other tabs are redundant: drop them. Returns true if the
+// active tab was among them, so the caller can re-select `keep`.
+function dropDuplicateTabs(keep) {
+  const dupes = tabs.filter((t) => t !== keep && samePath(t.path, keep.path, window.md.platform));
+  if (dupes.length === 0) return false;
+  const activeDropped = dupes.some((t) => t.id === activeId);
+  dupes.forEach((t) => t.el.remove());
+  tabs = tabs.filter((t) => !dupes.includes(t));
+  return activeDropped;
 }
 
 function saveActive() {
@@ -497,10 +529,16 @@ async function reloadActive() {
 // Resetting textarea.value clears that tab's undo stack, which is acceptable
 // when the file is being reloaded wholesale from disk.
 function applyExternal(tab, rawContent) {
-  const norm = rawContent.replace(/\r\n/g, '\n');
-  tab.eol = /\r\n/.test(rawContent) ? '\r\n' : '\n';
+  const { text, bom } = stripBom(rawContent);
+  const norm = normalizeEol(text);
+  tab.eol = detectEol(text);
+  tab.bom = bom;
   tab.saved = norm;
   tab.conflict = false;
+  if (tab.missing) { // a manual reload found the file again; re-arm its watcher
+    tab.missing = false;
+    afterTabsChange();
+  }
   tab.el.value = norm;
   if (tab.id === activeId) refreshPreview(tab);
   updateTabLabel(tab);
@@ -508,9 +546,9 @@ function applyExternal(tab, rawContent) {
 }
 
 function onFileChanged(payload) {
-  const tab = tabs.find((t) => t.path === payload.path);
+  const tab = tabs.find((t) => samePath(t.path, payload.path, window.md.platform));
   if (!tab) return;
-  const norm = payload.content.replace(/\r\n/g, '\n');
+  const norm = normalizeEol(stripBom(payload.content).text);
   if (norm === tab.saved) return; // our own save, or a no-op write
   if (isDirty(tab)) {
     // External change collides with local edits — flag it, don't clobber.
@@ -519,6 +557,15 @@ function onFileChanged(payload) {
   } else {
     applyExternal(tab, payload.content);
   }
+}
+
+// Main reports a watched file is gone (and has dropped its watcher). Keep the tab
+// and its text so the user can save it back.
+function onFileGone(payload) {
+  const tab = tabs.find((t) => samePath(t.path, payload.path, window.md.platform));
+  if (!tab) return;
+  tab.missing = true;
+  updateTabLabel(tab);
 }
 
 function syncDirty() {
@@ -535,12 +582,13 @@ async function handleQuitRequested() {
   const dirty = tabs.filter(isDirty);
   if (dirty.length === 0) { window.md.forceQuit(); return; }
   const choice = await window.md.confirmQuit(dirty.length);
-  if (choice === 'cancel') return;
+  if (choice === 'cancel') { window.md.cancelQuit(); return; }
   if (choice === 'save') {
     for (const tab of dirty) {
+      if (!tabs.includes(tab)) continue; // dropped as a duplicate by an earlier Save As
       switchTab(tab.id); // surface the tab a Save As dialog would target
       const ok = await saveTab(tab);
-      if (!ok) return; // a save was cancelled or failed → abort the quit
+      if (!ok) { window.md.cancelQuit(); return; } // a save was cancelled or failed → abort the quit
     }
   }
   window.md.forceQuit();
@@ -740,6 +788,7 @@ window.addEventListener('drop', async (e) => {
 // --- Wire up IPC + controls ------------------------------------------------
 window.md.onOpenTabs((list) => { (list || []).forEach(openFile); });
 window.md.onFileChanged(onFileChanged);
+window.md.onFileGone(onFileGone);
 window.md.onQuitRequested(handleQuitRequested);
 window.md.onMenuAction((action) => {
   switch (action) {

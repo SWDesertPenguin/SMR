@@ -2,10 +2,17 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
+const { fileURLToPath } = require('url');
+
+// A rejected promise nobody handles would otherwise vanish; surface it in the log.
+process.on('unhandledRejection', (err) => console.error('unhandled rejection:', err));
 
 let mainWindow = null;
 let forceClose = false;      // set true once the user confirms quitting with unsaved work
 let dirtyCount = 0;          // mirrored from the renderer so the close handler stays synchronous
+let pendingInstall = false;  // "Restart Now" was chosen with unsaved tabs; install once the quit flow finishes
+let rendererReady = false;   // true once the window's page has finished loading and can take tabs:open
+let pendingOpenPaths = [];   // files asked for before the window could show them (Finder launch, argv)
 
 const watchers = new Map();      // path -> fs.FSWatcher
 const watchDebounce = new Map(); // path -> timeout handle
@@ -23,10 +30,35 @@ function isMarkdown(filePath) {
   return MD_EXTS.includes(ext);
 }
 
+// Linux .desktop entries launch us with the %U field code, so a file manager may
+// hand us `file:///home/u/notes.md` rather than a path. isMarkdown() would happily
+// accept that string while every fs call on it fails, so normalize first. Returns
+// '' for a URI we can't convert, which then fails the isMarkdown check.
+function toLocalPath(arg) {
+  if (typeof arg !== 'string') return '';
+  if (!arg.startsWith('file://')) return arg;
+  try {
+    return fileURLToPath(arg);
+  } catch (_) {
+    return '';
+  }
+}
+
+// Every existing Markdown file named in an argv, as absolute paths. Skips the
+// '.' app-dir argument of `electron .` and any flag, and keeps all matches so
+// `smr a.md b.md` opens both.
+function markdownArgs(argv, cwd) {
+  return argv
+    .map(toLocalPath)
+    .filter((a) => a && a !== '.' && !a.startsWith('-'))
+    .map((a) => path.resolve(cwd, a))
+    .filter((p) => isMarkdown(p) && fs.existsSync(p));
+}
+
 // Open http(s)/mailto links in the system browser; ignore anything else.
 function openExternalUrl(url) {
   if (typeof url === 'string' && /^(https?:|mailto:)/.test(url)) {
-    shell.openExternal(url);
+    shell.openExternal(url).catch((err) => console.error('openExternal failed:', err));
   }
 }
 
@@ -50,6 +82,14 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
+  // tabs:open sent before the page loads is dropped (the renderer has not
+  // registered its listener yet), so queued paths are flushed once it has.
+  mainWindow.webContents.on('did-start-loading', () => { rendererReady = false; });
+  mainWindow.webContents.on('did-finish-load', () => {
+    rendererReady = true;
+    pendingOpenPaths.splice(0).forEach(pushOpen);
+  });
+
   // Open external links in the system browser instead of replacing the app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);
@@ -60,6 +100,14 @@ function createWindow() {
       event.preventDefault();
       openExternalUrl(url);
     }
+  });
+
+  // A dead renderer leaves a blank window with the user's tabs gone. Say why
+  // instead of failing silently, then reload so the window is usable again.
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('render-process-gone:', details);
+    dialog.showErrorBox('SMR stopped unexpectedly', `The window's process exited (${details.reason}). SMR will reload it; unsaved changes in open tabs are lost.`);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
   });
 
   // Intercept close when tabs are unsaved. dirtyCount (mirrored from the renderer
@@ -75,6 +123,9 @@ function createWindow() {
   mainWindow.on('closed', () => {
     stopAllWatching();
     mainWindow = null;
+    rendererReady = false;
+    dirtyCount = 0; // the tabs went with the window; a stale count would block a later install
+    pendingInstall = false;
   });
 }
 
@@ -87,10 +138,13 @@ function readForTab(filePath) {
   if (!isMarkdown(filePath)) {
     return { error: `Not a Markdown file: ${path.basename(filePath)}` };
   }
+  // Resolve once here so every path the renderer sees is absolute and normalized;
+  // the renderer dedupes tabs and matches watcher events by comparing these.
+  const abs = path.resolve(filePath);
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    app.addRecentDocument(filePath);
-    return { path: filePath, name: path.basename(filePath), content };
+    const content = fs.readFileSync(abs, 'utf8');
+    app.addRecentDocument(abs);
+    return { path: abs, name: path.basename(abs), content };
   } catch (err) {
     return { error: err.message };
   }
@@ -103,6 +157,19 @@ function pushOpen(filePath) {
     return;
   }
   if (mainWindow) mainWindow.webContents.send('tabs:open', [r]);
+}
+
+// Open files now if the window can take them, otherwise queue them for the
+// did-finish-load flush. On macOS the app can outlive its last window, so a
+// request that arrives then also has to bring a window back.
+function openPaths(paths) {
+  if (paths.length === 0) return;
+  if (mainWindow && rendererReady) {
+    paths.forEach(pushOpen);
+    return;
+  }
+  pendingOpenPaths.push(...paths);
+  if (!mainWindow && app.isReady()) createWindow();
 }
 
 // --- Watching ------------------------------------------------------------
@@ -124,28 +191,48 @@ function stopAllWatching() {
   for (const filePath of [...watchers.keys()]) stopWatching(filePath);
 }
 
+const WATCH_DEBOUNCE_MS = 120;
+const GONE_RETRIES = 5;
+const GONE_RETRY_MS = 200;
+
+// Look at a watched file once the burst of events has settled. A save that
+// replaces the file leaves nothing at the path for a moment, so a miss is retried
+// before the file is reported gone. The pending timer lives in watchDebounce, so
+// a new event or stopWatching() cancels it.
+function scheduleCheck(filePath, eventType, delay, attempt) {
+  const prev = watchDebounce.get(filePath);
+  if (prev) clearTimeout(prev);
+  watchDebounce.set(filePath, setTimeout(() => {
+    watchDebounce.delete(filePath);
+    if (!fs.existsSync(filePath)) {
+      if (attempt < GONE_RETRIES) {
+        scheduleCheck(filePath, eventType, GONE_RETRY_MS, attempt + 1);
+        return;
+      }
+      // Gone for good: drop the stale watcher and tell the renderer so the tab
+      // can say so. A later save re-arms watching through watch:set.
+      stopWatching(filePath);
+      if (mainWindow) mainWindow.webContents.send('file:gone', { path: filePath });
+      return;
+    }
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      if (mainWindow) mainWindow.webContents.send('file:changed', { path: filePath, content });
+    } catch (_) { /* transient read error during save; ignore */ }
+    // Atomic saves replace the inode, and a file that vanished and came back is a
+    // new one, so in both cases the original watch is now stale.
+    if (eventType === 'rename' || attempt > 0) {
+      stopWatching(filePath);
+      if (fs.existsSync(filePath)) startWatching(filePath);
+    }
+  }, delay));
+}
+
 function startWatching(filePath) {
   try {
+    // Debounce: editors often fire several events per save.
     const w = fs.watch(filePath, (eventType) => {
-      // Debounce: editors often fire several events per save.
-      const prev = watchDebounce.get(filePath);
-      if (prev) clearTimeout(prev);
-      watchDebounce.set(filePath, setTimeout(() => {
-        watchDebounce.delete(filePath);
-        if (!fs.existsSync(filePath)) {
-          stopWatching(filePath); // gone for good; drop the stale watcher
-          return;                 // leave the tab alone
-        }
-        try {
-          const content = fs.readFileSync(filePath, 'utf8');
-          if (mainWindow) mainWindow.webContents.send('file:changed', { path: filePath, content });
-        } catch (_) { /* transient read error during save; ignore */ }
-        // Atomic saves replace the inode, so the original watch is now stale.
-        if (eventType === 'rename') {
-          stopWatching(filePath);
-          if (fs.existsSync(filePath)) startWatching(filePath);
-        }
-      }, 120));
+      scheduleCheck(filePath, eventType, WATCH_DEBOUNCE_MS, 0);
     });
     watchers.set(filePath, w);
   } catch (err) {
@@ -230,7 +317,7 @@ ipcMain.handle('dialog:save', async (_evt, { content, name }) => {
   if (canceled || !filePath) return { canceled: true };
   lastDialogDir = path.dirname(filePath);
   // Enforce a Markdown extension even if the user typed a bare name.
-  const out = isMarkdown(filePath) ? filePath : `${filePath}.md`;
+  const out = path.resolve(isMarkdown(filePath) ? filePath : `${filePath}.md`);
   try {
     fs.writeFileSync(out, content, 'utf8');
     app.addRecentDocument(out);
@@ -276,10 +363,23 @@ ipcMain.on('app:dirty', (_evt, n) => {
 });
 
 // The renderer has finished its save/discard decision and wants to quit. Setting
-// forceClose makes the close handler above fall through on the re-close.
+// forceClose makes the close handler above fall through on the re-close. If the
+// quit was started by "Restart Now", this is also the point where it is safe to
+// hand over to the installer.
 ipcMain.on('app:force-quit', () => {
   forceClose = true;
-  if (mainWindow) mainWindow.close();
+  if (pendingInstall) {
+    pendingInstall = false;
+    autoUpdater.quitAndInstall();
+  } else if (mainWindow) {
+    mainWindow.close();
+  }
+});
+
+// The user cancelled the Save All / Don't Save / Cancel prompt, or a save failed.
+// Drop the pending install so a later ordinary quit does not trigger it.
+ipcMain.on('app:quit-cancelled', () => {
+  pendingInstall = false;
 });
 
 // --- Auto-update -----------------------------------------------------------
@@ -310,7 +410,7 @@ function initAutoUpdater() {
           type: 'info',
           message: `SMR ${info.version} found`,
           detail: "Downloading in the background. You'll be prompted to restart once it's ready."
-        });
+        }).catch(() => {});
       }
     } else {
       dialog.showMessageBox(mainWindow, {
@@ -322,7 +422,7 @@ function initAutoUpdater() {
         cancelId: 1
       }).then(({ response }) => {
         if (response === 0) openExternalUrl(`${REPO_URL}/releases/latest`);
-      });
+      }).catch(() => {});
     }
     manualUpdateCheck = false;
   });
@@ -333,7 +433,7 @@ function initAutoUpdater() {
         type: 'info',
         message: "You're up to date",
         detail: `SMR ${app.getVersion()} is the latest version.`
-      });
+      }).catch(() => {});
     }
     manualUpdateCheck = false;
   });
@@ -353,8 +453,16 @@ function initAutoUpdater() {
       defaultId: 0,
       cancelId: 1
     }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall();
-    });
+      if (response !== 0) return;
+      // quitAndInstall() launches the installer without giving the dirty-tab
+      // prompt a chance to run, so route through the renderer's quit flow first.
+      if (dirtyCount > 0 && mainWindow) {
+        pendingInstall = true;
+        mainWindow.webContents.send('app:quit-requested');
+      } else {
+        autoUpdater.quitAndInstall();
+      }
+    }).catch(() => {});
   });
 
   autoUpdater.checkForUpdates().catch(() => {}); // reported via the 'error' listener above
@@ -456,33 +564,49 @@ function buildMenu() {
 
 // --- App lifecycle -------------------------------------------------------
 
+// One running SMR owns the window and every watcher. A second launch (opening
+// another .md from the file manager, `smr b.md`) hands its files to that instance
+// through 'second-instance' and exits instead of opening a competing window.
+const gotInstanceLock = app.requestSingleInstanceLock();
+if (!gotInstanceLock) app.quit();
+
+app.on('second-instance', (_event, argv, cwd) => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+  // cwd is the second process's directory, which is what its relative args mean.
+  openPaths(markdownArgs(argv, cwd));
+});
+
 app.whenReady().then(() => {
+  if (!gotInstanceLock) return;
   buildMenu();
+
+  // Files named on the command line open once the renderer is ready. Queued
+  // ahead of createWindow() so they join any paths open-file already collected on
+  // a Finder launch and everything opens from one window.
+  pendingOpenPaths.push(...markdownArgs(process.argv, process.cwd()));
+
   createWindow();
   initAutoUpdater();
-
-  // If launched with a file path argument, open it once the renderer is ready.
-  const fileArg = process.argv.find((a) => a !== '.' && isMarkdown(a));
-  if (fileArg && fs.existsSync(fileArg)) {
-    mainWindow.webContents.once('did-finish-load', () => pushOpen(fileArg));
-  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-}).catch((err) => console.error('startup failed:', err));
+}).catch((err) => {
+  console.error('startup failed:', err);
+  dialog.showErrorBox('SMR failed to start', String(err));
+  app.exit(1);
+});
 
-// macOS: open file from Finder / file association.
+// macOS: open file from Finder / file association. On a Finder launch this fires
+// before 'ready', so the path is queued; the single whenReady handler above
+// creates the window and opens it. Creating a window here too gave two windows,
+// and closing the orphan nulled mainWindow and stopped every watcher.
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  if (mainWindow) {
-    pushOpen(filePath);
-  } else {
-    app.whenReady().then(() => {
-      createWindow();
-      mainWindow.webContents.once('did-finish-load', () => pushOpen(filePath));
-    }).catch((err) => console.error('open-file handling failed:', err));
-  }
+  openPaths([filePath]);
 });
 
 app.on('window-all-closed', () => {

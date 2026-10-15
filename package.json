@@ -40,6 +40,7 @@
       "main.js",
       "preload.js",
       "icon-dark.png",
+      "icon-dark.ico",
       "src/**/*",
       "node_modules/**/*"
     ],

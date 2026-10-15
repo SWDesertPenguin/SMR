@@ -49,7 +49,40 @@ export function makeSlugger() {
   };
 }
 
-// Apply the target end-of-line style to LF-normalized text before writing.
+// Collapse CRLF and lone CR to LF. A textarea does the same to its value, so
+// `saved` has to be normalized the same way or a lone-CR file opens dirty.
+export function normalizeEol(text) {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+// The end-of-line style to write back: CRLF if the file used any, else LF.
+export function detectEol(text) {
+  return /\r\n/.test(text) ? '\r\n' : '\n';
+}
+
+// Apply the target end-of-line style before writing. Idempotent, so text that
+// already contains CRLF is not turned into CRCRLF.
 export function toEol(text, eol) {
-  return eol === '\r\n' ? text.replace(/\n/g, '\r\n') : text;
+  return eol === '\r\n' ? text.replace(/\r?\n/g, '\r\n') : text;
+}
+
+// Whether two absolute paths name the same file. Windows paths are
+// case-insensitive, so `C:\Notes\A.md` and `c:\notes\a.md` are one tab there; every
+// other platform compares exactly. Main hands the renderer path.resolve()d paths,
+// so separators and `..` segments are already normalized.
+export function samePath(a, b, platform) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+// Split a leading UTF-8 byte-order mark off file content. A BOM left in the text
+// breaks the first heading and would be written back on every save, so the tab
+// keeps it as a flag and withBom() restores it when saving.
+export function stripBom(text) {
+  return text.charCodeAt(0) === 0xFEFF ? { text: text.slice(1), bom: true } : { text, bom: false };
+}
+
+// Re-attach the BOM that stripBom() removed. Never doubles an existing one.
+export function withBom(text, bom) {
+  return bom && text.charCodeAt(0) !== 0xFEFF ? `\uFEFF${text}` : text;
 }

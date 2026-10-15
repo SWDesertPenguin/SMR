@@ -32,6 +32,23 @@ export function comboToHtml(combo, mod) {
     .join(' / ');
 }
 
+// Build a per-document heading-id generator. Ids are Unicode-aware, prefixed with
+// "md-" so they can't collide with app element ids (#body, #tabs, #content...),
+// and de-duplicated with a numeric suffix. Call once per render so counts reset.
+export function makeSlugger() {
+  const counts = new Map();
+  return function slugify(text) {
+    const base = 'md-' + (text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\p{L}\p{N}\s-]/gu, '')
+      .replace(/\s+/g, '-') || 'section');
+    const n = counts.get(base) || 0;
+    counts.set(base, n + 1);
+    return n === 0 ? base : `${base}-${n}`;
+  };
+}
+
 // Apply the target end-of-line style to LF-normalized text before writing.
 export function toEol(text, eol) {
   return eol === '\r\n' ? text.replace(/\n/g, '\r\n') : text;

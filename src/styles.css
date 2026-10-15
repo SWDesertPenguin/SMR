@@ -334,6 +334,9 @@ body.no-tabs #empty-state { display: flex; }
   font-size: 16px;
   word-wrap: break-word;
 }
+/* Split view lets the text fill its pane; preview-only has the whole window, so
+   cap the measure to keep lines readable. */
+body.layout-preview .markdown-body { max-width: 100ch; margin: 0 auto; }
 
 .markdown-body h1,
 .markdown-body h2,
@@ -363,8 +366,11 @@ body.no-tabs #empty-state { display: flex; }
 
 .markdown-body input[type='checkbox'] { margin-right: 6px; }
 /* marked emits plain <li> for task items (no task-list-item class), so target
-   list items that directly contain a checkbox and drop the bullet. */
-.markdown-body li:has(> input[type='checkbox']) {
+   list items whose own checkbox is a direct child (tight lists) or sits in the
+   leading <p> (loose lists). A bare descendant match would also strip the bullet
+   from a plain parent item that merely has a task item nested under it. */
+.markdown-body li:has(> input[type='checkbox']),
+.markdown-body li:has(> p:first-child > input[type='checkbox']) {
   list-style: none;
   margin-left: -1.2em;
 }
@@ -412,7 +418,7 @@ body.no-tabs #empty-state { display: flex; }
 .markdown-body tr:nth-child(2n) { background: var(--bg-alt); }
 .markdown-body th { font-weight: 600; background: var(--bg-alt); }
 
-.markdown-body img { max-width: 100%; }
+.markdown-body img { max-width: 100%; height: auto; }
 .markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
 
 /* ---- Drop overlay ------------------------------------------------------- */

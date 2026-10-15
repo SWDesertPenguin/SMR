@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('md', {
   openDialog: () => ipcRenderer.invoke('dialog:open'),
   saveDialog: (content, name) => ipcRenderer.invoke('dialog:save', { content, name }),
   openPath: (filePath) => ipcRenderer.invoke('file:open-path', filePath),
+  // Open the Markdown file a relative link points at; href resolves against docPath's folder.
+  openRelative: (docPath, href) => ipcRenderer.invoke('file:open-relative', { docPath, href }),
   save: (filePath, content) => ipcRenderer.invoke('file:save', { path: filePath, content }),
   read: (filePath) => ipcRenderer.invoke('file:read', filePath),
   setWatched: (paths) => ipcRenderer.invoke('watch:set', paths),

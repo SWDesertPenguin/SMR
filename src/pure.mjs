@@ -86,3 +86,41 @@ export function stripBom(text) {
 export function withBom(text, bom) {
   return bom && text.charCodeAt(0) !== 0xFEFF ? `\uFEFF${text}` : text;
 }
+
+// A URL parser drops tabs, newlines and edge whitespace, and reads a backslash as a
+// slash, so `ht\ttps://x` and `\\host\x.png` are not what they look like. Scheme and
+// host tests below run on this squashed form; the attribute itself is never altered.
+function squashUrl(s) {
+  return (typeof s === 'string' ? s : '').replace(/[\u0000-\u0020]/g, '').replace(/\\/g, '/');
+}
+
+// How the preview treats an <img src>, judged on the raw attribute as written:
+// 'data' loads as is, 'remote' (any http(s) URL, or protocol-relative) is gated behind
+// the remote-images toggle, 'empty' is skipped, and anything else names a file beside
+// the document. The slashes after `https:` are not required to be a URL: `https:host/x`
+// and `https:/host/x` both reach the host, so the scheme alone decides.
+export function classifyImageSrc(src) {
+  const s = squashUrl(src);
+  if (s === '') return 'empty';
+  if (/^data:/i.test(s)) return 'data';
+  if (/^(https?:|\/\/)/i.test(s)) return 'remote';
+  return 'local';
+}
+
+// The smr-doc:// URL main serves a document's relative image from. `src` is the
+// raw attribute, percent-encoded again here so it survives as one query value.
+export function smrDocUrl(docPath, src) {
+  return `smr-doc://local/?doc=${encodeURIComponent(docPath)}&rel=${encodeURIComponent(src)}`;
+}
+
+// What a click on a preview link should do, judged on the raw href: 'anchor' scrolls
+// inside the preview, 'external' goes to the system browser, 'markdown' opens a
+// sibling document as a tab, and 'other' is swallowed. A scheme of two or more
+// letters marks a URL, so a Windows drive path (`C:\notes\a.md`) is not mistaken for one.
+export function classifyHref(href) {
+  const h = squashUrl(href);
+  if (h.startsWith('#')) return 'anchor';
+  if (/^(https?:|mailto:)/i.test(h)) return 'external';
+  if (/^[a-z][a-z0-9+.-]+:/i.test(h)) return 'other';
+  return /\.(md|markdown|mdown|mkd)$/i.test(h.replace(/[?#].*$/, '')) ? 'markdown' : 'other';
+}

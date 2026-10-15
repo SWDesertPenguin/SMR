@@ -24,6 +24,8 @@ macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that
 - Open via menu, drag-and-drop, or a file path argument — Markdown files only
 - GitHub-flavored Markdown: tables, task lists, fenced code, autolinks
 - Syntax highlighting via highlight.js
+- Relative images (`![](img/a.png)`) load from beside the open file, and relative links to other Markdown files (`[next](other.md)`) open as tabs
+- Remote images are blocked by default, since fetching one tells its host the document was opened; turn them on with the toolbar button or **View → Load Remote Images**
 - Collapsible table of contents (`Ctrl+T`) that tracks your scroll position
 - Dark mode toggle (`Ctrl+D`), remembered between sessions
 - Live re-render when an open file changes on disk; conflicting external edits are flagged instead of overwriting your changes

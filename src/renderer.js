@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -21,6 +21,7 @@ const elEditors = document.getElementById('editors');
 const elTabs = document.getElementById('tabs');
 const elDropOverlay = document.getElementById('drop-overlay');
 const btnTheme = document.getElementById('btn-theme');
+const btnRemote = document.getElementById('btn-remote');
 const btnToc = document.getElementById('btn-toc');
 const btnNew = document.getElementById('btn-new');
 const btnOpen = document.getElementById('btn-open');
@@ -104,10 +105,65 @@ function highlightCached(code, lang) {
   return res;
 }
 
+// Remote images are off until the user turns them on: fetching one tells its host
+// that the document was opened. The setting is global, not per tab.
+let remoteImages = localStorage.getItem('remoteImages') === '1';
+
+// 1x1 transparent PNG standing in for a blocked remote image.
+const BLOCKED_PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
+
+// Elements besides <img> that fetch an image from a URL attribute. DOMPurify keeps
+// all of them, and the CSP allows https: images, so each is a way around the gate.
+const IMAGE_FETCHERS = [
+  ['[poster]', 'poster'],
+  ['[background]', 'background'],
+  ['input[src]', 'src'],
+  ['image', 'href'], ['image', 'xlink:href'],
+  ['feImage', 'href'], ['feImage', 'xlink:href']
+];
+
+// Point the sanitized preview's images somewhere sensible. Relative srcs go through
+// smr-doc:// (main only serves files beside the open document), and remote ones are
+// swapped for a placeholder unless the user opted in. This runs after DOMPurify on
+// purpose: smr-doc: is not on its allowlist and must stay off it. It also runs on a
+// <template>'s content, which is inert, so no image starts loading under its original
+// src before it is rewritten.
+function rewriteImages(root, tab) {
+  root.querySelectorAll('img[src]').forEach((img) => {
+    const raw = img.getAttribute('src');
+    const kind = classifyImageSrc(raw);
+    if (kind === 'remote' && !remoteImages) {
+      img.setAttribute('data-remote-src', raw);
+      img.setAttribute('src', BLOCKED_PIXEL);
+      img.classList.add('img-blocked');
+      img.title = 'Remote image blocked (View > Load Remote Images)';
+    } else if (kind === 'local' && tab.path) {
+      img.setAttribute('src', smrDocUrl(tab.path, raw));
+    }
+  });
+  if (remoteImages) return;
+  // srcset outranks src and DOMPurify lets it through, so a remote URL in one would
+  // load past the gate above.
+  root.querySelectorAll('img[srcset], source[srcset]').forEach((el) => {
+    el.setAttribute('data-remote-srcset', el.getAttribute('srcset'));
+    el.removeAttribute('srcset');
+    el.removeAttribute('sizes');
+  });
+  // These never resolved relative paths, so dropping the attribute loses nothing local.
+  for (const [selector, attr] of IMAGE_FETCHERS) {
+    root.querySelectorAll(selector).forEach((el) => {
+      if (classifyImageSrc(el.getAttribute(attr)) !== 'data') el.removeAttribute(attr);
+    });
+  }
+}
+
 function renderPreview(tab) {
   if (!tab) return;
   const keepScroll = elPreview.scrollTop;
-  elContent.innerHTML = parseMarkdown(tab.el.value);
+  const tpl = document.createElement('template');
+  tpl.innerHTML = parseMarkdown(tab.el.value);
+  rewriteImages(tpl.content, tab);
+  elContent.replaceChildren(tpl.content);
   assignHeadingIds();
   highlightCodeBlocks();
   buildToc();
@@ -187,16 +243,40 @@ function observeHeadings() {
 
 // In-document links (#fragment). Heading ids carry an "md-" prefix, so a plain
 // hash navigation wouldn't find them; resolve the fragment inside the preview.
-elContent.addEventListener('click', (e) => {
-  const a = e.target instanceof Element ? e.target.closest('a[href^="#"]') : null;
-  if (!a) return;
-  e.preventDefault();
-  let frag = a.getAttribute('href').slice(1);
+function scrollToFragment(fragment) {
+  let frag = fragment;
   try { frag = decodeURIComponent(frag); } catch (_) { /* keep the raw fragment */ }
   if (!frag) return;
   const target = elContent.querySelector(`#${CSS.escape(`md-${frag}`)}`)
     || elContent.querySelector(`#${CSS.escape(frag)}`);
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// A relative link to another Markdown file opens it as a tab. Untitled tabs have no
+// folder to resolve against, so there it does nothing.
+async function openRelativeLink(href) {
+  const tab = getActiveTab();
+  if (!tab || !tab.path) return;
+  try {
+    const res = await window.md.openRelative(tab.path, href);
+    if (res && res.path) openFile(res);
+  } catch (err) {
+    console.error('open link failed:', err);
+  }
+}
+
+// Every click on a preview link is handled here; none is allowed to navigate the app.
+elContent.addEventListener('click', (e) => {
+  const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+  if (!a) return;
+  e.preventDefault();
+  const href = a.getAttribute('href').trim();
+  switch (classifyHref(href)) {
+    case 'anchor': scrollToFragment(href.slice(1)); break;
+    case 'external': window.md.openExternal(href); break;
+    case 'markdown': openRelativeLink(href); break;
+    default: break;
+  }
 });
 
 // Debounce live preview so fast typing doesn't re-parse on every keystroke.
@@ -487,6 +567,7 @@ async function saveTabAs(tab) {
     const activeDropped = dropDuplicateTabs(tab);
     afterTabsChange(); // path changed → update watchers
     if (activeDropped) switchTab(tab.id);
+    else if (tab.id === activeId) refreshPreview(tab); // relative images now have a folder to resolve against
     updateTabLabel(tab);
     syncDirty();
     return true;
@@ -607,6 +688,18 @@ function applyTheme(theme) {
 function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme');
   applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+// --- Remote images -------------------------------------------------------
+function applyRemoteImages(on) {
+  remoteImages = on;
+  btnRemote.setAttribute('aria-pressed', String(on));
+  localStorage.setItem('remoteImages', on ? '1' : '0');
+}
+
+function toggleRemoteImages() {
+  applyRemoteImages(!remoteImages);
+  refreshPreview(getActiveTab());
 }
 
 // --- TOC visibility --------------------------------------------------------
@@ -803,11 +896,13 @@ window.md.onMenuAction((action) => {
     case 'toggle-theme': toggleTheme(); break;
     case 'toggle-toc': toggleToc(); break;
     case 'toggle-layout': cycleLayout(); break;
+    case 'toggle-remote-images': toggleRemoteImages(); break;
     case 'help': toggleHelp(); break;
   }
 });
 
 btnTheme.addEventListener('click', toggleTheme);
+btnRemote.addEventListener('click', toggleRemoteImages);
 btnToc.addEventListener('click', toggleToc);
 btnNew.addEventListener('click', newTab);
 btnOpen.addEventListener('click', openViaDialog);
@@ -823,6 +918,7 @@ window.addEventListener('keydown', (e) => {
 
 // --- Initial state ---------------------------------------------------------
 applyTheme(localStorage.getItem('theme') || 'light');
+applyRemoteImages(remoteImages);
 if (localStorage.getItem('tocHidden') === '1') document.body.classList.add('toc-hidden');
 setLayout(localStorage.getItem('layout') || 'split');
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: smr-doc:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
   <title>SMR</title>
 
   <!-- highlight.js themes: only one is enabled at a time, toggled by theme. -->
@@ -21,6 +21,7 @@
     <span id="filename">No file open</span>
     <span class="spacer"></span>
     <button id="btn-layout" class="iconbtn" title="Cycle layout: split / preview / editor (Ctrl+E)" aria-label="Cycle layout">▥</button>
+    <button id="btn-remote" class="iconbtn" title="Load remote images" aria-label="Load remote images" aria-pressed="false">🖼</button>
     <button id="btn-theme" class="iconbtn" title="Toggle dark mode (Ctrl+D)" aria-label="Toggle dark mode">🌙</button>
     <button id="btn-help" class="iconbtn" title="Help" aria-label="Help">?</button>
   </header>

@@ -87,6 +87,7 @@ html, body {
   cursor: pointer;
 }
 .iconbtn:hover { background: var(--bg); border-color: var(--border); }
+.iconbtn[aria-pressed='true'] { background: var(--bg); border-color: var(--accent); }
 
 /* ---- Tab bar ------------------------------------------------------------ */
 #tabbar {
@@ -419,6 +420,7 @@ body.layout-preview .markdown-body { max-width: 100ch; margin: 0 auto; }
 .markdown-body th { font-weight: 600; background: var(--bg-alt); }
 
 .markdown-body img { max-width: 100%; height: auto; }
+.img-blocked { outline: 1px dashed var(--border); min-width: 24px; min-height: 24px; }
 .markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
 
 /* ---- Drop overlay ------------------------------------------------------- */

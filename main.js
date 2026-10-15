@@ -1,11 +1,16 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
-const { fileURLToPath } = require('url');
+const { fileURLToPath, pathToFileURL } = require('url');
 
 // A rejected promise nobody handles would otherwise vanish; surface it in the log.
 process.on('unhandledRejection', (err) => console.error('unhandled rejection:', err));
+
+// smr-doc:// serves the images a document references by relative path. The
+// renderer is sandboxed and has no file: access, so main reads them on its behalf.
+// Schemes have to be registered before the app is ready.
+protocol.registerSchemesAsPrivileged([{ scheme: 'smr-doc', privileges: { standard: true, secure: true } }]);
 
 let mainWindow = null;
 let forceClose = false;      // set true once the user confirms quitting with unsaved work
@@ -16,6 +21,7 @@ let pendingOpenPaths = [];   // files asked for before the window could show the
 
 const watchers = new Map();      // path -> fs.FSWatcher
 const watchDebounce = new Map(); // path -> timeout handle
+const openDocs = new Set();      // paths the renderer has open; smr-doc:// only serves beside these
 
 // The reader only deals in Markdown. This list is the single source of truth for
 // both the dialog filters and the per-path extension check used at every entry point.
@@ -122,6 +128,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     stopAllWatching();
+    openDocs.clear();
     mainWindow = null;
     rendererReady = false;
     dirtyCount = 0; // the tabs went with the window; a stale count would block a later install
@@ -144,6 +151,9 @@ function readForTab(filePath) {
   try {
     const content = fs.readFileSync(abs, 'utf8');
     app.addRecentDocument(abs);
+    // The renderer's watch:set arrives separately and can land after its first
+    // image request, so the doc is registered here as well, where it is handed out.
+    openDocs.add(abs);
     return { path: abs, name: path.basename(abs), content };
   } catch (err) {
     return { error: err.message };
@@ -244,11 +254,63 @@ function startWatching(filePath) {
 // Reconcile the watcher set to exactly the paths the renderer has open.
 function setWatched(paths) {
   const wanted = new Set(paths.filter((p) => typeof p === 'string' && p && isMarkdown(p)));
+  openDocs.clear();
+  wanted.forEach((p) => openDocs.add(p));
   for (const filePath of [...watchers.keys()]) {
     if (!wanted.has(filePath)) stopWatching(filePath);
   }
   for (const filePath of wanted) {
     if (!watchers.has(filePath)) startWatching(filePath);
+  }
+}
+
+// --- Local assets --------------------------------------------------------
+
+const ASSET_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
+
+// True when target is strictly below dir. path.relative compares case-insensitively
+// on win32, and testing the relative form (rather than a string prefix) keeps a
+// sibling like `docs-evil` from passing as being inside `docs`.
+function isInside(dir, target) {
+  const rel = path.relative(dir, target);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+// Map an smr-doc request to an image file on disk, or null if it must be refused.
+// `doc` has to be a document the renderer has open and `rel` is the src exactly as
+// written in the Markdown, so it is still percent-encoded and may carry a query or
+// fragment. Containment is decided on the resolved string before any fs access, so
+// a //host/share reference never makes the OS reach out.
+function resolveDocAsset(doc, rel) {
+  if (typeof doc !== 'string' || typeof rel !== 'string' || !openDocs.has(doc)) return null;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rel.replace(/[?#][\s\S]*$/, ''));
+  } catch (_) {
+    return null;
+  }
+  const dir = path.dirname(doc);
+  const target = path.resolve(dir, decoded);
+  if (!isInside(dir, target)) return null;
+  if (!ASSET_EXTS.has(path.extname(target).slice(1).toLowerCase())) return null;
+  return target;
+}
+
+async function handleDocAsset(request) {
+  const refuse = () => new Response('', { status: 403 });
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch (_) {
+    return refuse();
+  }
+  if (url.hostname !== 'local') return refuse();
+  const file = resolveDocAsset(url.searchParams.get('doc'), url.searchParams.get('rel'));
+  if (!file) return refuse();
+  try {
+    return await net.fetch(pathToFileURL(file).toString());
+  } catch (_) {
+    return new Response('', { status: 404 }); // missing or unreadable: a broken image, not an error
   }
 }
 
@@ -281,6 +343,36 @@ ipcMain.handle('file:open-path', (_evt, filePath) => {
   if (typeof filePath !== 'string' || !filePath) return { error: 'Invalid path' };
   const r = readForTab(filePath);
   if (r.error) dialog.showErrorBox('Could not open file', `${filePath}\n\n${r.error}`);
+  return r;
+});
+
+// A relative Markdown link clicked in the preview. The target resolves against the
+// folder of the document that holds the link and goes through readForTab, so the
+// md-only rule and the payload shape are the same as every other way of opening a
+// file. Failures get the same dialog as a bad drop, since a dead link that does
+// nothing looks like a broken button.
+ipcMain.handle('file:open-relative', (_evt, req) => {
+  const { docPath, href } = req || {};
+  if (typeof docPath !== 'string' || !path.isAbsolute(docPath) || typeof href !== 'string') {
+    return { error: 'Invalid link' };
+  }
+  const fail = (message) => {
+    dialog.showErrorBox('Could not open link', `${href}\n\n${message}`);
+    return { error: message };
+  };
+  let target;
+  try {
+    target = decodeURIComponent(href.replace(/[?#][\s\S]*$/, ''));
+  } catch (_) {
+    return fail('The link is not a valid path.');
+  }
+  // //host/share (or \\host\share) would have the OS contact that host to read it.
+  if (/^[\\/]{2}/.test(target)) return fail('Links to network paths are not opened.');
+  const abs = path.resolve(path.dirname(docPath), target);
+  if (!isMarkdown(abs)) return fail(`Not a Markdown file: ${path.basename(abs)}`);
+  if (!fs.existsSync(abs)) return fail(`File not found: ${abs}`);
+  const r = readForTab(abs);
+  if (r.error) return fail(r.error);
   return r;
 });
 
@@ -321,6 +413,7 @@ ipcMain.handle('dialog:save', async (_evt, { content, name }) => {
   try {
     fs.writeFileSync(out, content, 'utf8');
     app.addRecentDocument(out);
+    openDocs.add(out); // the tab re-renders with this path before watch:set lands
     return { path: out, name: path.basename(out) };
   } catch (err) {
     dialog.showErrorBox('Could not save file', `${out}\n\n${err.message}`);
@@ -530,6 +623,7 @@ function buildMenu() {
         { label: 'Toggle Dark Mode', accelerator: 'CmdOrCtrl+D', click: () => sendMenuAction('toggle-theme') },
         { label: 'Toggle Table of Contents', accelerator: 'CmdOrCtrl+T', click: () => sendMenuAction('toggle-toc') },
         { label: 'Cycle Layout (Split / Preview / Editor)', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('toggle-layout') },
+        { label: 'Load Remote Images', click: () => sendMenuAction('toggle-remote-images') },
         { type: 'separator' },
         { label: 'Next Tab', accelerator: 'CmdOrCtrl+PageDown', click: () => sendMenuAction('next-tab') },
         { label: 'Previous Tab', accelerator: 'CmdOrCtrl+PageUp', click: () => sendMenuAction('prev-tab') },
@@ -581,6 +675,7 @@ app.on('second-instance', (_event, argv, cwd) => {
 
 app.whenReady().then(() => {
   if (!gotInstanceLock) return;
+  protocol.handle('smr-doc', handleDocAsset);
   buildMenu();
 
   // Files named on the command line open once the renderer is ready. Queued

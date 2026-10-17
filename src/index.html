@@ -6,6 +6,9 @@
         content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: smr-doc:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
   <title>SMR</title>
 
+  <!-- Sets data-theme before first paint; see the comment in the file. -->
+  <script src="theme-init.js"></script>
+
   <!-- highlight.js themes: only one is enabled at a time, toggled by theme. -->
   <link id="hljs-light" rel="stylesheet" href="../node_modules/highlight.js/styles/github.min.css" />
   <link id="hljs-dark" rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.min.css" disabled />

@@ -100,14 +100,23 @@ function openExternalUrl(url) {
   }
 }
 
+// The --bg values from styles.css. The window shows this colour until the page
+// paints, so it has to match the theme or dark users get a white flash.
+const BG_LIGHT = '#ffffff';
+const BG_DARK = '#0d1117';
+
 function createWindow() {
   forceClose = false; // a fresh window starts with no pending force-quit
+  const settings = readSettings();
+  // Same order the renderer uses, minus localStorage, which main can't see: a user
+  // migrating from it gets the OS colour for one launch, then the saved theme.
+  const dark = settings.theme === 'dark' || (settings.theme !== 'light' && nativeTheme.shouldUseDarkColors);
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
     minWidth: 480,
     minHeight: 360,
-    backgroundColor: '#ffffff',
+    backgroundColor: dark ? BG_DARK : BG_LIGHT,
     title: 'SMR',
     icon: path.join(__dirname, process.platform === 'win32' ? 'icon-dark.ico' : 'icon-dark.png'),
     webPreferences: {

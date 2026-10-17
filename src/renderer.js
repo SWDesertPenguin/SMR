@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref, resolveTheme, validLayout } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -676,13 +676,15 @@ async function handleQuitRequested() {
 }
 
 // --- Theme -----------------------------------------------------------------
-function applyTheme(theme) {
+// `persist` is false for a startup theme that came from the OS, so the app keeps
+// following the system until the user picks one.
+function applyTheme(theme, persist = true) {
   document.documentElement.setAttribute('data-theme', theme);
   const dark = theme === 'dark';
   linkLight.disabled = dark;
   linkDark.disabled = !dark;
   btnTheme.textContent = dark ? '☀️' : '🌙';
-  localStorage.setItem('theme', theme);
+  if (persist) window.md.setSetting('theme', theme);
 }
 
 function toggleTheme() {
@@ -917,10 +919,13 @@ window.addEventListener('keydown', (e) => {
 });
 
 // --- Initial state ---------------------------------------------------------
-applyTheme(localStorage.getItem('theme') || 'light');
+// The old localStorage theme is read only to migrate it into the settings file.
+const settings = window.md.settings || {};
+const initialTheme = resolveTheme(settings.theme, localStorage.getItem('theme'), settings.systemDark);
+applyTheme(initialTheme.theme, initialTheme.migrate);
 applyRemoteImages(remoteImages);
 if (localStorage.getItem('tocHidden') === '1') document.body.classList.add('toc-hidden');
-setLayout(localStorage.getItem('layout') || 'split');
+setLayout(validLayout(localStorage.getItem('layout'), LAYOUTS, 'split'));
 
 // Restore persisted pane sizes (clamped in case the window is now narrower).
 const savedTocW = parseFloat(localStorage.getItem('tocWidth'));

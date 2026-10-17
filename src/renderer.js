@@ -35,7 +35,7 @@ const elBody = document.getElementById('body');
 const elPanes = document.getElementById('panes');
 const gutterToc = document.getElementById('gutter-toc');
 const gutterSplit = document.getElementById('gutter-split');
-const elHelpOverlay = document.getElementById('help-overlay');
+const elHelp = document.getElementById('help-dialog');
 
 // Platform-aware modifier label: ⌘ on macOS, Ctrl elsewhere.
 const isMac = (window.md.platform || '') === 'darwin';
@@ -861,7 +861,7 @@ initGutter(gutterSplit, (clientX) => {
 initGutterKeys(gutterToc, (dir) => setTocWidth(currentTocWidth() + dir * 16));
 initGutterKeys(gutterSplit, (dir) => setSplitPos(currentSplitFraction() + dir * 0.02));
 
-// --- Help overlay ----------------------------------------------------------
+// --- Help dialog -----------------------------------------------------------
 // One row per shortcut; MOD is substituted with ⌘ or Ctrl and each key token
 // is wrapped in a <kbd> chip.
 const SHORTCUTS = [
@@ -893,14 +893,20 @@ function buildHelp() {
     });
   }
   document.getElementById('help-close')?.addEventListener('click', hideHelp);
-  elHelpOverlay.addEventListener('click', (e) => {
-    if (e.target === elHelpOverlay) hideHelp();
+  // The dialog has no padding or background of its own, so a click whose target is
+  // the dialog rather than the card inside it landed on the backdrop. It has to start
+  // there too, or selecting text in the card and overshooting the edge would close it.
+  let pressedOnBackdrop = false;
+  elHelp.addEventListener('pointerdown', (e) => { pressedOnBackdrop = e.target === elHelp; });
+  elHelp.addEventListener('click', (e) => {
+    if (e.target === elHelp && pressedOnBackdrop) hideHelp();
   });
 }
 
-function showHelp() { elHelpOverlay.hidden = false; }
-function hideHelp() { elHelpOverlay.hidden = true; }
-function toggleHelp() { elHelpOverlay.hidden ? showHelp() : hideHelp(); }
+// Esc is handled by the dialog itself, and focus returns to whatever had it before.
+function showHelp() { if (!elHelp.open) elHelp.showModal(); }
+function hideHelp() { elHelp.close(); }
+function toggleHelp() { if (elHelp.open) hideHelp(); else showHelp(); }
 
 // Rewrite Windows-style hints for macOS: ⌘ in tooltips and empty-state kbds.
 function localizeShortcuts() {
@@ -991,11 +997,6 @@ btnSave.addEventListener('click', saveActive);
 btnLayout.addEventListener('click', cycleLayout);
 btnNewTab.addEventListener('click', newTab);
 btnHelp.addEventListener('click', toggleHelp);
-
-// Escape closes the help overlay.
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !elHelpOverlay.hidden) hideHelp();
-});
 
 // --- Initial state ---------------------------------------------------------
 // The old localStorage theme is read only to migrate it into the settings file.

@@ -63,9 +63,9 @@
 
   <div id="drop-overlay"><div class="drop-msg">Drop to open</div></div>
 
-  <div id="help-overlay" hidden>
-    <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
-      <button id="help-close" class="help-close" aria-label="Close help" title="Close (Esc)">×</button>
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="help-card">
+      <button id="help-close" class="help-close" aria-label="Close help" title="Close (Esc)" autofocus>×</button>
       <h2 id="help-title">SMR — Standalone Markdown Reader</h2>
       <p>Open one or more <code>.md</code> files as tabs, edit on the left, and watch the live preview on the right. Drag the dividers to resize any pane; in split view, scrolling one side scrolls the other.</p>
 
@@ -84,7 +84,7 @@
         <a id="help-github" href="#">SMR on GitHub ↗</a> — source code, issues, and documentation.
       </p>
     </div>
-  </div>
+  </dialog>
 
   <script type="module" src="renderer.js"></script>
 </body>

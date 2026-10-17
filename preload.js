@@ -1,9 +1,22 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+// Read once at load, before any page script runs. This is the app's only
+// synchronous IPC call; everything after it is async.
+let settings = {};
+try {
+  settings = ipcRenderer.sendSync('settings:get') || {};
+} catch (_) { /* start from defaults */ }
+
 // Minimal, explicit API surface for the renderer. No direct fs/ipc exposure.
 contextBridge.exposeInMainWorld('md', {
   // Host platform, so the renderer can show ⌘ vs Ctrl and adapt copy.
   platform: process.platform,
+
+  // Saved preferences as of launch, plus systemDark (the OS color scheme).
+  settings,
+
+  // Persist one preference. Main validates the key and value before writing.
+  setSetting: (key, value) => ipcRenderer.invoke('settings:set', { [key]: value }),
 
   // Open an external URL (e.g. the project's GitHub page) in the system browser.
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
@@ -28,6 +41,7 @@ contextBridge.exposeInMainWorld('md', {
   setWatched: (paths) => ipcRenderer.invoke('watch:set', paths),
   confirmClose: (name) => ipcRenderer.invoke('dialog:confirm-close', name),
   confirmQuit: (n) => ipcRenderer.invoke('dialog:confirm-quit', n),
+  confirmReload: (name) => ipcRenderer.invoke('dialog:confirm-reload', name),
 
   // Renderer → main: keep the main process's unsaved-count mirror in sync so the
   // window-close handler can decide synchronously.

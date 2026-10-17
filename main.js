@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, screen, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +29,38 @@ const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
 const FILE_FILTERS = [{ name: 'Markdown', extensions: MD_EXTS }];
 
 const REPO_URL = 'https://github.com/SWDesertPenguin/SMR';
+
+// --- Settings --------------------------------------------------------------
+
+// User preferences live in one JSON file in userData. Everything here is
+// synchronous and best-effort: a missing, unreadable or malformed file reads as {}
+// and a failed write is logged, so a bad settings file never stops the app starting.
+function settingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function readSettings() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+// Merge `partial` into what is on disk. Written beside the target and renamed over
+// it so a crash mid-write can't leave a half-written settings file.
+function writeSettings(partial) {
+  try {
+    const file = settingsPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...readSettings(), ...partial }, null, 2));
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    console.error('writing settings failed:', err);
+  }
+}
 
 function isMarkdown(filePath) {
   if (typeof filePath !== 'string') return false;
@@ -68,14 +100,49 @@ function openExternalUrl(url) {
   }
 }
 
+// The --bg values from styles.css. The window shows this color until the page
+// paints, so it has to match the theme or dark users get a white flash.
+const BG_LIGHT = '#ffffff';
+const BG_DARK = '#0d1117';
+
+const MIN_WIDTH = 480;
+const MIN_HEIGHT = 360;
+
+// The saved window rectangle if it is still usable, otherwise null. A display that
+// was unplugged or rearranged since the last run can leave it off screen.
+// getDisplayMatching always answers (with the nearest display when nothing
+// overlaps), so the overlap with that display's work area has to be checked here.
+function usableBounds(saved) {
+  if (!saved || typeof saved !== 'object') return null;
+  const { x, y, width, height } = saved;
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  if (width < MIN_WIDTH || height < MIN_HEIGHT) return null;
+  const wa = screen.getDisplayMatching({ x, y, width, height }).workArea;
+  const overlaps = x < wa.x + wa.width && x + width > wa.x && y < wa.y + wa.height && y + height > wa.y;
+  return overlaps ? { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) } : null;
+}
+
+// Remember where the window was (its restored size if it is maximized) and whether
+// it was maximized, for the next launch.
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  writeSettings({ windowBounds: mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() });
+}
+
 function createWindow() {
   forceClose = false; // a fresh window starts with no pending force-quit
+  const settings = readSettings();
+  // Same order the renderer uses, minus localStorage, which main can't see: a user
+  // migrating from it gets the OS color for one launch, then the saved theme.
+  const dark = settings.theme === 'dark' || (settings.theme !== 'light' && nativeTheme.shouldUseDarkColors);
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
-    minWidth: 480,
-    minHeight: 360,
-    backgroundColor: '#ffffff',
+    // Saved bounds go to the constructor so the window opens in place, not after a jump.
+    ...usableBounds(settings.windowBounds),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
+    backgroundColor: dark ? BG_DARK : BG_LIGHT,
     title: 'SMR',
     icon: path.join(__dirname, process.platform === 'win32' ? 'icon-dark.ico' : 'icon-dark.png'),
     webPreferences: {
@@ -85,6 +152,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     }
   });
+
+  if (settings.maximized === true) mainWindow.maximize();
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
@@ -121,6 +190,7 @@ function createWindow() {
   // renderer then drives the Save All / Don't Save / Cancel flow and calls back
   // via app:force-quit so it can reuse the same save logic the tabs already use.
   mainWindow.on('close', (event) => {
+    saveWindowState(); // first, so a cancelled or intercepted close still records it
     if (forceClose || dirtyCount === 0) return;
     event.preventDefault();
     if (mainWindow) mainWindow.webContents.send('app:quit-requested');
@@ -437,6 +507,21 @@ ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
   return ['save', 'discard', 'cancel'][response];
 });
 
+// Reload throws away the tab's unsaved edits, so Cancel is the default and the Esc
+// answer. The renderer used window.confirm, which blocks the whole page.
+ipcMain.handle('dialog:confirm-reload', async (_evt, name) => {
+  if (!mainWindow) return false;
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Reload', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Reload ${String(name)} from disk?`,
+    detail: 'Your unsaved changes will be discarded.'
+  });
+  return response === 0;
+});
+
 ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
@@ -450,6 +535,34 @@ ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
 });
 
 ipcMain.handle('shell:open-external', (_evt, url) => openExternalUrl(url));
+
+// The one synchronous IPC in the app. The preload asks once at load so the page
+// knows its theme before it first paints. systemDark rides along in the payload but
+// is never stored. returnValue is always set: leaving it unset blocks the renderer.
+ipcMain.on('settings:get', (event) => {
+  let payload;
+  try {
+    payload = { ...readSettings(), systemDark: nativeTheme.shouldUseDarkColors };
+  } catch (_) {
+    payload = { systemDark: false };
+  }
+  event.returnValue = payload;
+});
+
+// Settings the renderer may change. The rest of the file (window bounds, skipped
+// update version) belongs to main, so the page can't rewrite it.
+const RENDERER_SETTINGS = {
+  theme: (v) => v === 'light' || v === 'dark'
+};
+
+ipcMain.handle('settings:set', (_evt, partial) => {
+  if (!partial || typeof partial !== 'object' || Array.isArray(partial)) return;
+  const accepted = {};
+  for (const [key, value] of Object.entries(partial)) {
+    if (Object.hasOwn(RENDERER_SETTINGS, key) && RENDERER_SETTINGS[key](value)) accepted[key] = value;
+  }
+  if (Object.keys(accepted).length > 0) writeSettings(accepted);
+});
 
 ipcMain.on('app:dirty', (_evt, n) => {
   dirtyCount = Number(n) || 0;
@@ -506,15 +619,19 @@ function initAutoUpdater() {
         }).catch(() => {});
       }
     } else {
+      // A version the user chose to skip stays quiet on automatic checks; a manual
+      // check always shows it. Read fresh so a skip made earlier this run counts.
+      if (!manualUpdateCheck && info.version === readSettings().skippedVersion) return;
       dialog.showMessageBox(mainWindow, {
         type: 'info',
         message: `SMR ${info.version} is available`,
         detail: "Auto-install isn't supported on this platform yet. Download it from GitHub?",
-        buttons: ['View Release', 'Later'],
+        buttons: ['View Release', 'Later', 'Skip This Version'],
         defaultId: 0,
-        cancelId: 1
+        cancelId: 1 // Esc or closing the box is "Later", never a skip
       }).then(({ response }) => {
         if (response === 0) openExternalUrl(`${REPO_URL}/releases/latest`);
+        else if (response === 2) writeSettings({ skippedVersion: info.version });
       }).catch(() => {});
     }
     manualUpdateCheck = false;
@@ -589,6 +706,10 @@ async function showAbout() {
 function buildMenu() {
   const isMac = process.platform === 'darwin';
 
+  if (isMac) {
+    app.setAboutPanelOptions({ applicationName: 'SMR', applicationVersion: app.getVersion(), website: REPO_URL });
+  }
+
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
@@ -602,7 +723,8 @@ function buildMenu() {
         { label: 'Reload From Disk', accelerator: 'CmdOrCtrl+R', click: () => sendMenuAction('reload') },
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => sendMenuAction('close-tab') },
-        isMac ? { role: 'close' } : { role: 'quit' }
+        // The mac close role defaults to Cmd+W, which is Close Tab above.
+        isMac ? { role: 'close', accelerator: 'Shift+CmdOrCtrl+W' } : { role: 'quit' }
       ]
     },
     {
@@ -636,6 +758,7 @@ function buildMenu() {
         ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }])
       ]
     },
+    ...(isMac ? [{ role: 'windowMenu' }] : []),
     {
       role: 'help',
       submenu: [
@@ -648,7 +771,8 @@ function buildMenu() {
           enabled: app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR,
           click: checkForUpdatesManually
         },
-        { label: 'About SMR', click: showAbout }
+        // The mac app menu has its own About item, fed by setAboutPanelOptions above.
+        ...(isMac ? [] : [{ label: 'About SMR', click: showAbout }])
       ]
     }
   ];

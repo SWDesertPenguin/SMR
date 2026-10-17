@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref, resolveTheme, validLayout } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -35,11 +35,14 @@ const elBody = document.getElementById('body');
 const elPanes = document.getElementById('panes');
 const gutterToc = document.getElementById('gutter-toc');
 const gutterSplit = document.getElementById('gutter-split');
-const elHelpOverlay = document.getElementById('help-overlay');
+const elHelp = document.getElementById('help-dialog');
 
 // Platform-aware modifier label: ⌘ on macOS, Ctrl elsewhere.
 const isMac = (window.md.platform || '') === 'darwin';
 const MOD = isMac ? '⌘' : 'Ctrl';
+// Tooltip form of a shortcut, matching what localizeShortcuts() does to the static
+// titles in index.html: ⌘W on macOS, Ctrl+W elsewhere. Use it for any title built here.
+const shortcutHint = (key) => (isMac ? `${MOD}${key}` : `${MOD}+${key}`);
 
 // --- Tab state -------------------------------------------------------------
 // Each tab keeps its own <textarea> in the DOM (hidden when inactive) so it owns
@@ -215,12 +218,16 @@ function buildToc() {
     a.href = `#${h.id}`;
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      h.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     });
     li.appendChild(a);
     elTocList.appendChild(li);
   });
 }
+
+// Smooth scrolling is skipped for anyone who asked the OS for reduced motion. Checked
+// on each call so a change to that setting applies without a reload.
+const scrollBehavior = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
 // Highlight the active TOC entry while scrolling the preview.
 const tocObserver = new IntersectionObserver(
@@ -249,7 +256,7 @@ function scrollToFragment(fragment) {
   if (!frag) return;
   const target = elContent.querySelector(`#${CSS.escape(`md-${frag}`)}`)
     || elContent.querySelector(`#${CSS.escape(frag)}`);
-  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (target) target.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
 }
 
 // A relative link to another Markdown file opens it as a tab. Untitled tabs have no
@@ -473,11 +480,23 @@ function showEmpty() {
 
 // --- Tab bar + title UI ----------------------------------------------------
 function renderTabBar() {
+  // The rebuild below replaces every tab element, which would drop keyboard focus
+  // from one that has it. Note which it was so focus can go back to its successor.
+  const focusedId = elTabs.contains(document.activeElement)
+    ? document.activeElement.closest('.tab')?.dataset.id
+    : undefined;
   elTabs.innerHTML = '';
+  // Roving tabindex: the tab strip is one Tab stop, on the active tab (or the first
+  // one if none is active), and the arrow keys move within it.
+  const stopId = tabs.some((t) => t.id === activeId) ? activeId : tabs[0]?.id;
   tabs.forEach((tab) => {
     const el = document.createElement('div');
     el.className = 'tab';
     el.dataset.id = String(tab.id);
+    el.setAttribute('role', 'tab');
+    el.setAttribute('aria-selected', String(tab.id === activeId));
+    el.setAttribute('aria-label', tabAriaLabel(tab));
+    el.tabIndex = tab.id === stopId ? 0 : -1;
     el.classList.toggle('active', tab.id === activeId);
     el.classList.toggle('conflict', tab.conflict);
     el.title = tabTooltip(tab);
@@ -487,19 +506,48 @@ function renderTabBar() {
     name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
     el.appendChild(name);
 
+    // Not a Tab stop of its own (it would break the roving tabindex); Ctrl+W closes
+    // from the keyboard.
     const close = document.createElement('button');
     close.className = 'tab-close';
+    close.tabIndex = -1;
     close.textContent = '×';
-    close.title = 'Close tab (Ctrl+W)';
+    close.title = `Close tab (${shortcutHint('W')})`;
+    close.setAttribute('aria-label', `Close ${tab.name}`);
     close.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.id); });
     el.appendChild(close);
 
     el.addEventListener('click', () => switchTab(tab.id));
+    el.addEventListener('keydown', (e) => onTabKeydown(e, tab));
     el.addEventListener('auxclick', (e) => {
       if (e.button === 1) { e.preventDefault(); closeTab(tab.id); }
     });
     elTabs.appendChild(el);
   });
+  if (focusedId) elTabs.querySelector(`.tab[data-id="${focusedId}"]`)?.focus();
+}
+
+// Enter/Space activate the tab. Left/Right move to the neighbouring tab (wrapping)
+// and activate it, keeping focus on the tab strip rather than jumping into the editor.
+function onTabKeydown(e, tab) {
+  if (e.target !== e.currentTarget) return; // keys on the close button are its own
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    switchTab(tab.id);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+    switchTab(next.id);
+    // switchTab hands focus to the editor; take it back for the tab that was chosen.
+    elTabs.querySelector(`.tab[data-id="${next.id}"]`)?.focus();
+  }
+}
+
+// Accessible name for a tab: the close button inside it would otherwise be read as
+// part of the name, and the unsaved bullet as "bullet".
+function tabAriaLabel(tab) {
+  return isDirty(tab) ? `${tab.name}, unsaved changes` : tab.name;
 }
 
 // Hover text for a tab: where it lives, plus what is wrong with it on disk.
@@ -514,6 +562,7 @@ function updateTabLabel(tab) {
   if (el) {
     el.classList.toggle('conflict', tab.conflict);
     el.title = tabTooltip(tab);
+    el.setAttribute('aria-label', tabAriaLabel(tab));
     const name = el.querySelector('.tab-name');
     if (name) name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
   }
@@ -601,7 +650,7 @@ function saveActiveAs() {
 async function reloadActive() {
   const tab = getActiveTab();
   if (!tab || !tab.path) return;
-  if (isDirty(tab) && !window.confirm('Discard your changes and reload this file from disk?')) return;
+  if (isDirty(tab) && !(await window.md.confirmReload(tab.name))) return;
   const res = await window.md.read(tab.path);
   if (res && typeof res.content === 'string') applyExternal(tab, res.content);
 }
@@ -676,13 +725,15 @@ async function handleQuitRequested() {
 }
 
 // --- Theme -----------------------------------------------------------------
-function applyTheme(theme) {
+// `persist` is false for a startup theme that came from the OS, so the app keeps
+// following the system until the user picks one.
+function applyTheme(theme, persist = true) {
   document.documentElement.setAttribute('data-theme', theme);
   const dark = theme === 'dark';
   linkLight.disabled = dark;
   linkDark.disabled = !dark;
   btnTheme.textContent = dark ? '☀️' : '🌙';
-  localStorage.setItem('theme', theme);
+  if (persist) window.md.setSetting('theme', theme);
 }
 
 function toggleTheme() {
@@ -761,16 +812,47 @@ function initGutter(gutter, onDrag) {
   });
 }
 
+const tocMaxWidth = () => window.innerWidth * 0.6;
+
 function setTocWidth(px) {
-  const w = clampTocWidth(px, window.innerWidth * 0.6);
+  const w = clampTocWidth(px, tocMaxWidth());
   document.documentElement.style.setProperty('--toc-width', `${w}px`);
   localStorage.setItem('tocWidth', String(w));
+  syncGutterAria();
 }
 
 function setSplitPos(fraction) {
   const pct = `${(clampSplitFraction(fraction) * 100).toFixed(2)}%`;
   document.documentElement.style.setProperty('--split-pos', pct);
   localStorage.setItem('splitPos', pct);
+  syncGutterAria();
+}
+
+// The pane sizes live in two CSS variables, set by a drag, a restore, or the arrow
+// keys below. Reading them back keeps one source of truth and covers the defaults
+// from styles.css when nothing has been set yet.
+const currentTocWidth = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toc-width'));
+const currentSplitFraction = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--split-pos')) / 100;
+
+// A focusable separator needs its value for a screen reader: the contents width in
+// px, and the editor's share of the split in percent. The bounds are the clamps.
+function syncGutterAria() {
+  gutterToc.setAttribute('aria-valuemin', String(clampTocWidth(0, Infinity)));
+  gutterToc.setAttribute('aria-valuemax', String(Math.round(tocMaxWidth())));
+  gutterToc.setAttribute('aria-valuenow', String(Math.round(currentTocWidth())));
+  gutterSplit.setAttribute('aria-valuemin', String(Math.round(clampSplitFraction(0) * 100)));
+  gutterSplit.setAttribute('aria-valuemax', String(Math.round(clampSplitFraction(1) * 100)));
+  gutterSplit.setAttribute('aria-valuenow', String(Math.round(currentSplitFraction() * 100)));
+}
+window.addEventListener('resize', syncGutterAria);
+
+// Left/Right nudge the divider the way a drag would: toward the arrow's side.
+function initGutterKeys(gutter, nudge) {
+  gutter.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    nudge(e.key === 'ArrowRight' ? 1 : -1);
+  });
 }
 
 initGutter(gutterToc, (clientX) => {
@@ -780,8 +862,10 @@ initGutter(gutterSplit, (clientX) => {
   const rect = elPanes.getBoundingClientRect();
   if (rect.width > 0) setSplitPos((clientX - rect.left) / rect.width);
 });
+initGutterKeys(gutterToc, (dir) => setTocWidth(currentTocWidth() + dir * 16));
+initGutterKeys(gutterSplit, (dir) => setSplitPos(currentSplitFraction() + dir * 0.02));
 
-// --- Help overlay ----------------------------------------------------------
+// --- Help dialog -----------------------------------------------------------
 // One row per shortcut; MOD is substituted with ⌘ or Ctrl and each key token
 // is wrapped in a <kbd> chip.
 const SHORTCUTS = [
@@ -794,7 +878,8 @@ const SHORTCUTS = [
   ['Next / previous tab', 'MOD+PgDn / MOD+PgUp'],
   ['Cycle layout', 'MOD+E'],
   ['Toggle dark mode', 'MOD+D'],
-  ['Toggle contents', 'MOD+T']
+  ['Toggle contents', 'MOD+T'],
+  ['Help', 'MOD+/']
 ];
 
 function buildHelp() {
@@ -812,14 +897,20 @@ function buildHelp() {
     });
   }
   document.getElementById('help-close')?.addEventListener('click', hideHelp);
-  elHelpOverlay.addEventListener('click', (e) => {
-    if (e.target === elHelpOverlay) hideHelp();
+  // The dialog has no padding or background of its own, so a click whose target is
+  // the dialog rather than the card inside it landed on the backdrop. It has to start
+  // there too, or selecting text in the card and overshooting the edge would close it.
+  let pressedOnBackdrop = false;
+  elHelp.addEventListener('pointerdown', (e) => { pressedOnBackdrop = e.target === elHelp; });
+  elHelp.addEventListener('click', (e) => {
+    if (e.target === elHelp && pressedOnBackdrop) hideHelp();
   });
 }
 
-function showHelp() { elHelpOverlay.hidden = false; }
-function hideHelp() { elHelpOverlay.hidden = true; }
-function toggleHelp() { elHelpOverlay.hidden ? showHelp() : hideHelp(); }
+// Esc is handled by the dialog itself, and focus returns to whatever had it before.
+function showHelp() { if (!elHelp.open) elHelp.showModal(); }
+function hideHelp() { elHelp.close(); }
+function toggleHelp() { if (elHelp.open) hideHelp(); else showHelp(); }
 
 // Rewrite Windows-style hints for macOS: ⌘ in tooltips and empty-state kbds.
 function localizeShortcuts() {
@@ -911,22 +1002,21 @@ btnLayout.addEventListener('click', cycleLayout);
 btnNewTab.addEventListener('click', newTab);
 btnHelp.addEventListener('click', toggleHelp);
 
-// Escape closes the help overlay.
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !elHelpOverlay.hidden) hideHelp();
-});
-
 // --- Initial state ---------------------------------------------------------
-applyTheme(localStorage.getItem('theme') || 'light');
+// The old localStorage theme is read only to migrate it into the settings file.
+const settings = window.md.settings || {};
+const initialTheme = resolveTheme(settings.theme, localStorage.getItem('theme'), settings.systemDark);
+applyTheme(initialTheme.theme, initialTheme.migrate);
 applyRemoteImages(remoteImages);
 if (localStorage.getItem('tocHidden') === '1') document.body.classList.add('toc-hidden');
-setLayout(localStorage.getItem('layout') || 'split');
+setLayout(validLayout(localStorage.getItem('layout'), LAYOUTS, 'split'));
 
 // Restore persisted pane sizes (clamped in case the window is now narrower).
 const savedTocW = parseFloat(localStorage.getItem('tocWidth'));
 if (Number.isFinite(savedTocW)) setTocWidth(savedTocW);
 const savedSplit = parseFloat(localStorage.getItem('splitPos'));
 if (Number.isFinite(savedSplit)) setSplitPos(savedSplit / 100);
+syncGutterAria(); // covers the defaults when nothing was restored
 
 buildHelp();
 localizeShortcuts();

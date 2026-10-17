@@ -6,6 +6,9 @@
         content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: smr-doc:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
   <title>SMR</title>
 
+  <!-- Sets data-theme before first paint; see the comment in the file. -->
+  <script src="theme-init.js"></script>
+
   <!-- highlight.js themes: only one is enabled at a time, toggled by theme. -->
   <link id="hljs-light" rel="stylesheet" href="../node_modules/highlight.js/styles/github.min.css" />
   <link id="hljs-dark" rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.min.css" disabled />
@@ -23,11 +26,11 @@
     <button id="btn-layout" class="iconbtn" title="Cycle layout: split / preview / editor (Ctrl+E)" aria-label="Cycle layout">▥</button>
     <button id="btn-remote" class="iconbtn" title="Load remote images" aria-label="Load remote images" aria-pressed="false">🖼</button>
     <button id="btn-theme" class="iconbtn" title="Toggle dark mode (Ctrl+D)" aria-label="Toggle dark mode">🌙</button>
-    <button id="btn-help" class="iconbtn" title="Help" aria-label="Help">?</button>
+    <button id="btn-help" class="iconbtn" title="Help (Ctrl+/)" aria-label="Help">?</button>
   </header>
 
-  <div id="tabbar" role="tablist">
-    <div id="tabs"></div>
+  <div id="tabbar">
+    <div id="tabs" role="tablist" aria-label="Open files"></div>
     <button id="btn-newtab" class="tab-new" title="New tab (Ctrl+N)" aria-label="New tab">+</button>
   </div>
 
@@ -37,14 +40,14 @@
       <ul id="toc-list"></ul>
     </nav>
 
-    <div class="gutter" id="gutter-toc" role="separator" aria-orientation="vertical" aria-label="Resize contents"></div>
+    <div class="gutter" id="gutter-toc" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize contents"></div>
 
     <div id="panes">
       <section id="editor-pane">
         <div id="editors"></div>
       </section>
 
-      <div class="gutter" id="gutter-split" role="separator" aria-orientation="vertical" aria-label="Resize editor and preview"></div>
+      <div class="gutter" id="gutter-split" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize editor and preview"></div>
 
       <section id="preview-pane">
         <article id="content" class="markdown-body"></article>
@@ -60,9 +63,9 @@
 
   <div id="drop-overlay"><div class="drop-msg">Drop to open</div></div>
 
-  <div id="help-overlay" hidden>
-    <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
-      <button id="help-close" class="help-close" aria-label="Close help" title="Close (Esc)">×</button>
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="help-card">
+      <button id="help-close" class="help-close" aria-label="Close help" title="Close (Esc)" autofocus>×</button>
       <h2 id="help-title">SMR — Standalone Markdown Reader</h2>
       <p>Open one or more <code>.md</code> files as tabs, edit on the left, and watch the live preview on the right. Drag the dividers to resize any pane; in split view, scrolling one side scrolls the other.</p>
 
@@ -81,7 +84,7 @@
         <a id="help-github" href="#">SMR on GitHub ↗</a> — source code, issues, and documentation.
       </p>
     </div>
-  </div>
+  </dialog>
 
   <script type="module" src="renderer.js"></script>
 </body>

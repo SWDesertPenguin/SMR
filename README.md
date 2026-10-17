@@ -17,7 +17,7 @@ macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that
 
 - Multiple files open at once as tabs, with per-tab undo and unsaved-change markers
 - Edit Markdown with a live preview that updates as you type
-- Resizable panes: drag the dividers to size the contents list and the editor/preview split; sizes are remembered
+- Resizable panes: drag the dividers, or focus one and press the left and right arrow keys, to size the contents list and the editor/preview split; sizes are remembered
 - Synchronized scrolling in split view — scroll either side and the other follows
 - Cycle the layout (`Ctrl+E`) between split, preview-only, and editor-only
 - Save (`Ctrl+S`) and Save As (`Ctrl+Shift+S`); new files default to a `.md` name
@@ -27,7 +27,7 @@ macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that
 - Relative images (`![](img/a.png)`) load from beside the open file, and relative links to other Markdown files (`[next](other.md)`) open as tabs
 - Remote images are blocked by default, since fetching one tells its host the document was opened; turn them on with the toolbar button or **View → Load Remote Images**
 - Collapsible table of contents (`Ctrl+T`) that tracks your scroll position
-- Dark mode toggle (`Ctrl+D`), remembered between sessions
+- Dark mode toggle (`Ctrl+D`); it follows your system theme until you pick one, and your choice is remembered between sessions along with the window size and position
 - Live re-render when an open file changes on disk; conflicting external edits are flagged instead of overwriting your changes
 - Runs on Windows and macOS, with platform-correct keyboard shortcuts
 

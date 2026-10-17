@@ -22,6 +22,28 @@ export function clampSplitFraction(f) {
   return Math.max(0.15, Math.min(f, 0.85));
 }
 
+// A stored theme is only trusted when it is exactly 'light' or 'dark'.
+export function validTheme(v) {
+  return v === 'light' || v === 'dark' ? v : null;
+}
+
+// The theme to start with: the settings file, then the old localStorage value, then
+// the OS color scheme. `migrate` is true when the answer came from localStorage and
+// should be written to settings; the OS fallback is deliberately not persisted, so
+// the app keeps following the system until the user picks a theme.
+export function resolveTheme(settingsTheme, storedTheme, systemDark) {
+  const fromSettings = validTheme(settingsTheme);
+  if (fromSettings) return { theme: fromSettings, migrate: false };
+  const fromStorage = validTheme(storedTheme);
+  if (fromStorage) return { theme: fromStorage, migrate: true };
+  return { theme: systemDark ? 'dark' : 'light', migrate: false };
+}
+
+// A stored layout name if it is one of `layouts`, otherwise the fallback.
+export function validLayout(v, layouts, fallback) {
+  return layouts.includes(v) ? v : fallback;
+}
+
 // Render a shortcut combo like "MOD+Shift+S" into <kbd> chips, substituting the
 // platform modifier (⌘ or Ctrl) for MOD and splitting on '+' and ' / '.
 export function comboToHtml(combo, mod) {

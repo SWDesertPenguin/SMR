@@ -3,6 +3,8 @@ const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
 const { fileURLToPath, pathToFileURL } = require('url');
+// pure.mjs is an ES module shared with the renderer; Electron's Node can require() it.
+const { MD_EXTS, isMarkdown, toLocalPath, isExternalUrl, ensureMdExt } = require('./src/pure.mjs');
 
 // A rejected promise nobody handles would otherwise vanish; surface it in the log.
 process.on('unhandledRejection', (err) => console.error('unhandled rejection:', err));
@@ -23,9 +25,8 @@ const watchers = new Map();      // path -> fs.FSWatcher
 const watchDebounce = new Map(); // path -> timeout handle
 const openDocs = new Set();      // paths the renderer has open; smr-doc:// only serves beside these
 
-// The reader only deals in Markdown. This list is the single source of truth for
-// both the dialog filters and the per-path extension check used at every entry point.
-const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
+// The reader only deals in Markdown; MD_EXTS (src/pure.mjs) drives both these dialog
+// filters and the per-path extension check used at every entry point.
 const FILE_FILTERS = [{ name: 'Markdown', extensions: MD_EXTS }];
 
 const REPO_URL = 'https://github.com/SWDesertPenguin/SMR';
@@ -62,32 +63,12 @@ function writeSettings(partial) {
   }
 }
 
-function isMarkdown(filePath) {
-  if (typeof filePath !== 'string') return false;
-  const ext = path.extname(filePath).slice(1).toLowerCase();
-  return MD_EXTS.includes(ext);
-}
-
-// Linux .desktop entries launch us with the %U field code, so a file manager may
-// hand us `file:///home/u/notes.md` rather than a path. isMarkdown() would happily
-// accept that string while every fs call on it fails, so normalize first. Returns
-// '' for a URI we can't convert, which then fails the isMarkdown check.
-function toLocalPath(arg) {
-  if (typeof arg !== 'string') return '';
-  if (!arg.startsWith('file://')) return arg;
-  try {
-    return fileURLToPath(arg);
-  } catch (_) {
-    return '';
-  }
-}
-
 // Every existing Markdown file named in an argv, as absolute paths. Skips the
 // '.' app-dir argument of `electron .` and any flag, and keeps all matches so
 // `smr a.md b.md` opens both.
 function markdownArgs(argv, cwd) {
   return argv
-    .map(toLocalPath)
+    .map((a) => toLocalPath(a, fileURLToPath))
     .filter((a) => a && a !== '.' && !a.startsWith('-'))
     .map((a) => path.resolve(cwd, a))
     .filter((p) => isMarkdown(p) && fs.existsSync(p));
@@ -95,7 +76,7 @@ function markdownArgs(argv, cwd) {
 
 // Open http(s)/mailto links in the system browser; ignore anything else.
 function openExternalUrl(url) {
-  if (typeof url === 'string' && /^(https?:|mailto:)/.test(url)) {
+  if (isExternalUrl(url)) {
     shell.openExternal(url).catch((err) => console.error('openExternal failed:', err));
   }
 }
@@ -479,7 +460,7 @@ ipcMain.handle('dialog:save', async (_evt, { content, name }) => {
   if (canceled || !filePath) return { canceled: true };
   lastDialogDir = path.dirname(filePath);
   // Enforce a Markdown extension even if the user typed a bare name.
-  const out = path.resolve(isMarkdown(filePath) ? filePath : `${filePath}.md`);
+  const out = path.resolve(ensureMdExt(filePath));
   try {
     fs.writeFileSync(out, content, 'utf8');
     app.addRecentDocument(out);
@@ -495,6 +476,10 @@ ipcMain.handle('watch:set', (_evt, paths) => {
   setWatched(Array.isArray(paths) ? paths : []);
 });
 
+// Both unsaved-changes prompts list their buttons in this order (Save, Don't Save,
+// Cancel); the clicked index is mapped to the name the renderer switches on.
+const CHOICES = ['save', 'discard', 'cancel'];
+
 ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
@@ -504,7 +489,7 @@ ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
     message: `Save changes to ${name}?`,
     detail: "Your changes will be lost if you don't save them."
   });
-  return ['save', 'discard', 'cancel'][response];
+  return CHOICES[response];
 });
 
 // Reload throws away the tab's unsaved edits, so Cancel is the default and the Esc
@@ -531,20 +516,23 @@ ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
     message: 'You have unsaved changes.',
     detail: `${n} file(s) have unsaved changes. Save before quitting?`
   });
-  return ['save', 'discard', 'cancel'][response];
+  return CHOICES[response];
 });
 
 ipcMain.handle('shell:open-external', (_evt, url) => openExternalUrl(url));
 
 // The one synchronous IPC in the app. The preload asks once at load so the page
-// knows its theme before it first paints. systemDark rides along in the payload but
-// is never stored. returnValue is always set: leaving it unset blocks the renderer.
+// knows its theme before it first paints. systemDark, repoUrl and version ride along
+// in the payload but are never stored, and they follow the spread so a hand-edited
+// settings file can't override them. returnValue is always set: leaving it unset
+// blocks the renderer.
 ipcMain.on('settings:get', (event) => {
+  const fixed = { repoUrl: REPO_URL, version: app.getVersion() };
   let payload;
   try {
-    payload = { ...readSettings(), systemDark: nativeTheme.shouldUseDarkColors };
+    payload = { ...readSettings(), systemDark: nativeTheme.shouldUseDarkColors, ...fixed };
   } catch (_) {
-    payload = { systemDark: false };
+    payload = { systemDark: false, ...fixed };
   }
   event.returnValue = payload;
 });

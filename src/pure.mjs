@@ -1,6 +1,8 @@
-// Pure, DOM-free helpers shared by the renderer (src/renderer.js) and the unit
-// tests (test/pure.test.mjs). Nothing here may touch the DOM, window, or IPC —
-// that keeps it importable in plain Node so the logic can be tested in CI.
+// Pure, DOM-free helpers shared by the renderer (src/renderer.js), the main
+// process (main.js, through require) and the unit tests (test/*.test.mjs). Nothing
+// here may touch the DOM, window, IPC or a Node built-in, and nothing may use
+// top-level await: the renderer loads this file as a browser module, and main
+// loads it with require(), which needs Node 22.12+ (Electron 44 bundles Node 24).
 
 // Proportional scroll target: map the source pane's scroll fraction onto the
 // destination pane's scrollable range. Returns null if either can't scroll.
@@ -147,4 +149,71 @@ export function classifyHref(href) {
   if (/^(https?:|mailto:)/i.test(h)) return 'external';
   if (/^[a-z][a-z0-9+.-]+:/i.test(h)) return 'other';
   return /\.(md|markdown|mdown|mkd)$/i.test(h.replace(/[?#].*$/, '')) ? 'markdown' : 'other';
+}
+
+// --- Tabs --------------------------------------------------------------------
+
+// The name offered in Save As for a tab that has no path yet: the tab's own name,
+// with .md added unless it already ends that way (the check is case-sensitive).
+export function suggestedName(name) {
+  return name.endsWith('.md') ? name : `${name}.md`;
+}
+
+// The index `dir` (1 or -1) steps from `current`, wrapping at both ends. Plain
+// arithmetic: callers skip it when there are fewer than two tabs.
+export function cycleIndex(length, current, dir) {
+  return (current + dir + length) % length;
+}
+
+// Which tab to show after one closes, as an index into the tabs that remain
+// (`length` counts them, so it is the list after the close). The tab that slid into
+// the closed slot wins, then the last one; -1 means no tabs are left.
+export function neighborAfterClose(length, closedIndex) {
+  if (length <= 0) return -1;
+  return closedIndex >= 0 && closedIndex < length ? closedIndex : length - 1;
+}
+
+// --- Files (used by main.js) -------------------------------------------------
+
+// The reader only deals in Markdown. This list is the single source of truth for
+// the dialog filters and the per-path extension check; package.json's
+// fileAssociations has to name the same extensions (a test compares them).
+export const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
+
+// Whether a path names a Markdown file, by its last extension. Mirrors
+// path.extname without importing it: a name that is only a dot-extension (`.md`) has
+// none, and trailing separators are ignored. Both separators count on every
+// platform, so a POSIX file literally named `dir\.md` is the one case that differs.
+export function isMarkdown(filePath) {
+  if (typeof filePath !== 'string') return false;
+  const base = filePath.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
+  const dot = base.lastIndexOf('.');
+  return dot > 0 && MD_EXTS.includes(base.slice(dot + 1).toLowerCase());
+}
+
+// Linux .desktop entries launch us with the %U field code, so a file manager may
+// hand us `file:///home/u/notes.md` rather than a path. isMarkdown() would happily
+// accept that string while every fs call on it fails, so normalize first. Returns
+// '' for a URI we can't convert, which then fails the isMarkdown check. The
+// converter is passed in (main hands over url.fileURLToPath) so this file stays free
+// of Node built-ins.
+export function toLocalPath(arg, fileURLToPath) {
+  if (typeof arg !== 'string') return '';
+  if (!arg.startsWith('file://')) return arg;
+  try {
+    return fileURLToPath(arg);
+  } catch (_) {
+    return '';
+  }
+}
+
+// The links main opens in the system browser: http(s) and mailto, nothing else.
+// Case-sensitive on purpose, as the check it replaced was.
+export function isExternalUrl(url) {
+  return typeof url === 'string' && /^(https?:|mailto:)/.test(url);
+}
+
+// Enforce a Markdown extension on a save path, even if the user typed a bare name.
+export function ensureMdExt(filePath) {
+  return isMarkdown(filePath) ? filePath : `${filePath}.md`;
 }

@@ -2,7 +2,7 @@
 // (src/pure.mjs). Run with `npm test` (`node --test`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyImageSrc, smrDocUrl, classifyHref } from '../src/pure.mjs';
+import { classifyImageSrc, smrDocUrl, classifyHref, isExternalUrl } from '../src/pure.mjs';
 
 const BS = '\x5c'; // one backslash, spelled so the Windows paths below stay readable
 
@@ -59,4 +59,19 @@ test('classifyHref routes anchors, external links, Markdown files and the rest',
   assert.equal(classifyHref('file:///etc/a.md'), 'other', 'other schemes are never opened as relative files');
   assert.equal(classifyHref(''), 'other');
   assert.equal(classifyHref(null), 'other');
+});
+
+test('isExternalUrl allows only http, https and mailto', () => {
+  assert.equal(isExternalUrl('https://example.com/a'), true);
+  assert.equal(isExternalUrl('http://example.com'), true);
+  assert.equal(isExternalUrl('mailto:a@example.com'), true);
+  assert.equal(isExternalUrl('HTTPS://example.com'), false, 'the allowlist is case-sensitive');
+  assert.equal(isExternalUrl(' https://example.com'), false, 'no leading whitespace');
+  assert.equal(isExternalUrl('file:///etc/passwd'), false);
+  assert.equal(isExternalUrl('javascript:alert(1)'), false);
+  assert.equal(isExternalUrl('smr-doc://local/?doc=x&rel=y'), false);
+  assert.equal(isExternalUrl('ftp://example.com'), false);
+  assert.equal(isExternalUrl(''), false);
+  assert.equal(isExternalUrl(null), false);
+  assert.equal(isExternalUrl(undefined), false);
 });

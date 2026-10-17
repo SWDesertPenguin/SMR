@@ -10,7 +10,7 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import hljs from '../node_modules/@highlightjs/cdn-assets/es/highlight.min.js';
 
 // Pure, DOM-free helpers live in pure.mjs so they can be unit-tested in Node.
-import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref, resolveTheme, validLayout } from './pure.mjs';
+import { proportional, clampTocWidth, clampSplitFraction, comboToHtml, toEol, makeSlugger, normalizeEol, detectEol, samePath, stripBom, withBom, classifyImageSrc, smrDocUrl, classifyHref, resolveTheme, validLayout, suggestedName, cycleIndex, neighborAfterClose } from './pure.mjs';
 
 // --- DOM handles -----------------------------------------------------------
 const elContent = document.getElementById('content');
@@ -433,7 +433,7 @@ async function closeTab(id) {
   // Hand off to the neighbor now sitting at the closed slot (or the last tab).
   // Clearing activeId first keeps switchTab from saving the closed tab's scroll
   // onto the wrong tab.
-  const next = tabs[idx] || tabs[tabs.length - 1];
+  const next = tabs[neighborAfterClose(tabs.length, idx)];
   activeId = null;
   if (next) switchTab(next.id);
   else showEmpty();
@@ -537,7 +537,7 @@ function onTabKeydown(e, tab) {
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     e.preventDefault();
     const step = e.key === 'ArrowRight' ? 1 : -1;
-    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+    const next = tabs[cycleIndex(tabs.length, tabs.indexOf(tab), step)];
     switchTab(next.id);
     // switchTab hands focus to the editor; take it back for the tab that was chosen.
     elTabs.querySelector(`.tab[data-id="${next.id}"]`)?.focus();
@@ -579,8 +579,7 @@ function updateActiveUi() {
 function cycleTab(dir) {
   if (tabs.length < 2) return;
   const i = tabs.findIndex((t) => t.id === activeId);
-  const next = tabs[(i + dir + tabs.length) % tabs.length];
-  switchTab(next.id);
+  switchTab(tabs[cycleIndex(tabs.length, i, dir)].id);
 }
 
 // --- Saving ----------------------------------------------------------------
@@ -605,7 +604,7 @@ async function saveTab(tab) {
 
 async function saveTabAs(tab) {
   const text = tab.el.value;
-  const suggested = tab.path || (tab.name.endsWith('.md') ? tab.name : `${tab.name}.md`);
+  const suggested = tab.path || suggestedName(tab.name);
   const res = await window.md.saveDialog(toEol(withBom(text, tab.bom), tab.eol), suggested);
   if (res && res.path) {
     tab.path = res.path;

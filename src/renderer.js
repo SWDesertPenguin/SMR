@@ -40,6 +40,9 @@ const elHelpOverlay = document.getElementById('help-overlay');
 // Platform-aware modifier label: ⌘ on macOS, Ctrl elsewhere.
 const isMac = (window.md.platform || '') === 'darwin';
 const MOD = isMac ? '⌘' : 'Ctrl';
+// Tooltip form of a shortcut, matching what localizeShortcuts() does to the static
+// titles in index.html: ⌘W on macOS, Ctrl+W elsewhere. Use it for any title built here.
+const shortcutHint = (key) => (isMac ? `${MOD}${key}` : `${MOD}+${key}`);
 
 // --- Tab state -------------------------------------------------------------
 // Each tab keeps its own <textarea> in the DOM (hidden when inactive) so it owns
@@ -490,7 +493,7 @@ function renderTabBar() {
     const close = document.createElement('button');
     close.className = 'tab-close';
     close.textContent = '×';
-    close.title = 'Close tab (Ctrl+W)';
+    close.title = `Close tab (${shortcutHint('W')})`;
     close.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.id); });
     el.appendChild(close);
 
@@ -796,7 +799,8 @@ const SHORTCUTS = [
   ['Next / previous tab', 'MOD+PgDn / MOD+PgUp'],
   ['Cycle layout', 'MOD+E'],
   ['Toggle dark mode', 'MOD+D'],
-  ['Toggle contents', 'MOD+T']
+  ['Toggle contents', 'MOD+T'],
+  ['Help', 'MOD+/']
 ];
 
 function buildHelp() {

@@ -113,6 +113,8 @@ export function withBom(text, bom) {
 // slash, so `ht\ttps://x` and `\\host\x.png` are not what they look like. Scheme and
 // host tests below run on this squashed form; the attribute itself is never altered.
 function squashUrl(s) {
+  // The control range is the point: URL parsing drops exactly these characters.
+  // eslint-disable-next-line no-control-regex
   return (typeof s === 'string' ? s : '').replace(/[\u0000-\u0020]/g, '').replace(/\\/g, '/');
 }
 

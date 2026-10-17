@@ -28,7 +28,7 @@ export function validTheme(v) {
 }
 
 // The theme to start with: the settings file, then the old localStorage value, then
-// the OS colour scheme. `migrate` is true when the answer came from localStorage and
+// the OS color scheme. `migrate` is true when the answer came from localStorage and
 // should be written to settings; the OS fallback is deliberately not persisted, so
 // the app keeps following the system until the user picks a theme.
 export function resolveTheme(settingsTheme, storedTheme, systemDark) {

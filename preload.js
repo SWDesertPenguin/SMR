@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('md', {
   // Host platform, so the renderer can show ⌘ vs Ctrl and adapt copy.
   platform: process.platform,
 
-  // Saved preferences as of launch, plus systemDark (the OS colour scheme).
+  // Saved preferences as of launch, plus systemDark (the OS color scheme).
   settings,
 
   // Persist one preference. Main validates the key and value before writing.

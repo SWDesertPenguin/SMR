@@ -100,7 +100,7 @@ function openExternalUrl(url) {
   }
 }
 
-// The --bg values from styles.css. The window shows this colour until the page
+// The --bg values from styles.css. The window shows this color until the page
 // paints, so it has to match the theme or dark users get a white flash.
 const BG_LIGHT = '#ffffff';
 const BG_DARK = '#0d1117';
@@ -133,7 +133,7 @@ function createWindow() {
   forceClose = false; // a fresh window starts with no pending force-quit
   const settings = readSettings();
   // Same order the renderer uses, minus localStorage, which main can't see: a user
-  // migrating from it gets the OS colour for one launch, then the saved theme.
+  // migrating from it gets the OS color for one launch, then the saved theme.
   const dark = settings.theme === 'dark' || (settings.theme !== 'light' && nativeTheme.shouldUseDarkColors);
   mainWindow = new BrowserWindow({
     width: 1100,

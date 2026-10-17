@@ -604,15 +604,19 @@ function initAutoUpdater() {
         }).catch(() => {});
       }
     } else {
+      // A version the user chose to skip stays quiet on automatic checks; a manual
+      // check always shows it. Read fresh so a skip made earlier this run counts.
+      if (!manualUpdateCheck && info.version === readSettings().skippedVersion) return;
       dialog.showMessageBox(mainWindow, {
         type: 'info',
         message: `SMR ${info.version} is available`,
         detail: "Auto-install isn't supported on this platform yet. Download it from GitHub?",
-        buttons: ['View Release', 'Later'],
+        buttons: ['View Release', 'Later', 'Skip This Version'],
         defaultId: 0,
-        cancelId: 1
+        cancelId: 1 // Esc or closing the box is "Later", never a skip
       }).then(({ response }) => {
         if (response === 0) openExternalUrl(`${REPO_URL}/releases/latest`);
+        else if (response === 2) writeSettings({ skippedVersion: info.version });
       }).catch(() => {});
     }
     manualUpdateCheck = false;

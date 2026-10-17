@@ -507,6 +507,21 @@ ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
   return ['save', 'discard', 'cancel'][response];
 });
 
+// Reload throws away the tab's unsaved edits, so Cancel is the default and the Esc
+// answer. The renderer used window.confirm, which blocks the whole page.
+ipcMain.handle('dialog:confirm-reload', async (_evt, name) => {
+  if (!mainWindow) return false;
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Reload', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Reload ${String(name)} from disk?`,
+    detail: 'Your unsaved changes will be discarded.'
+  });
+  return response === 0;
+});
+
 ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'warning',

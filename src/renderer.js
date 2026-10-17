@@ -601,7 +601,7 @@ function saveActiveAs() {
 async function reloadActive() {
   const tab = getActiveTab();
   if (!tab || !tab.path) return;
-  if (isDirty(tab) && !window.confirm('Discard your changes and reload this file from disk?')) return;
+  if (isDirty(tab) && !(await window.md.confirmReload(tab.name))) return;
   const res = await window.md.read(tab.path);
   if (res && typeof res.content === 'string') applyExternal(tab, res.content);
 }

@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('md', {
   setWatched: (paths) => ipcRenderer.invoke('watch:set', paths),
   confirmClose: (name) => ipcRenderer.invoke('dialog:confirm-close', name),
   confirmQuit: (n) => ipcRenderer.invoke('dialog:confirm-quit', n),
+  confirmReload: (name) => ipcRenderer.invoke('dialog:confirm-reload', name),
 
   // Renderer → main: keep the main process's unsaved-count mirror in sync so the
   // window-close handler can decide synchronously.

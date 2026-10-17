@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Icons are binary; never run them through line-ending normalization
+*.ico binary
+*.png binary

@@ -33,6 +33,7 @@
   "build": {
     "appId": "com.smr.app",
     "productName": "SMR",
+    "copyright": "Copyright © 2026 SWDesertPenguin",
     "publish": [
       {
         "provider": "github",
@@ -45,8 +46,7 @@
       "preload.js",
       "icon-dark.png",
       "icon-dark.ico",
-      "src/**/*",
-      "node_modules/**/*"
+      "src/**/*"
     ],
     "fileAssociations": [
       {
@@ -56,6 +56,16 @@
       },
       {
         "ext": "markdown",
+        "name": "Markdown Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "mdown",
+        "name": "Markdown Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "mkd",
         "name": "Markdown Document",
         "role": "Editor"
       }

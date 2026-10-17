@@ -2,6 +2,7 @@
 // loads. Run with `npm test` (`node --test`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { samePath, MD_EXTS, isMarkdown, toLocalPath, ensureMdExt, classifyHref } from '../src/pure.mjs';
@@ -20,6 +21,12 @@ test('samePath is false when either side is not a string', () => {
   assert.equal(samePath(null, 'a.md', 'win32'), false);
   assert.equal(samePath('a.md', undefined, 'linux'), false);
   assert.equal(samePath(null, null, 'win32'), false, 'two untitled tabs are not the same file');
+});
+
+test('MD_EXTS matches the file associations in package.json', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const associated = pkg.build.fileAssociations.map((a) => a.ext).sort();
+  assert.deepEqual(associated, [...MD_EXTS].sort());
 });
 
 test('every extension in MD_EXTS counts as Markdown and as a Markdown link', () => {

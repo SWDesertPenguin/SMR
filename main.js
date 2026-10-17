@@ -687,6 +687,10 @@ async function showAbout() {
 function buildMenu() {
   const isMac = process.platform === 'darwin';
 
+  if (isMac) {
+    app.setAboutPanelOptions({ applicationName: 'SMR', applicationVersion: app.getVersion(), website: REPO_URL });
+  }
+
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
@@ -700,7 +704,8 @@ function buildMenu() {
         { label: 'Reload From Disk', accelerator: 'CmdOrCtrl+R', click: () => sendMenuAction('reload') },
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => sendMenuAction('close-tab') },
-        isMac ? { role: 'close' } : { role: 'quit' }
+        // The mac close role defaults to Cmd+W, which is Close Tab above.
+        isMac ? { role: 'close', accelerator: 'Shift+CmdOrCtrl+W' } : { role: 'quit' }
       ]
     },
     {
@@ -734,6 +739,7 @@ function buildMenu() {
         ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }])
       ]
     },
+    ...(isMac ? [{ role: 'windowMenu' }] : []),
     {
       role: 'help',
       submenu: [
@@ -746,7 +752,8 @@ function buildMenu() {
           enabled: app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR,
           click: checkForUpdatesManually
         },
-        { label: 'About SMR', click: showAbout }
+        // The mac app menu has its own About item, fed by setAboutPanelOptions above.
+        ...(isMac ? [] : [{ label: 'About SMR', click: showAbout }])
       ]
     }
   ];

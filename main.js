@@ -105,6 +105,30 @@ function openExternalUrl(url) {
 const BG_LIGHT = '#ffffff';
 const BG_DARK = '#0d1117';
 
+const MIN_WIDTH = 480;
+const MIN_HEIGHT = 360;
+
+// The saved window rectangle if it is still usable, otherwise null. A display that
+// was unplugged or rearranged since the last run can leave it off screen.
+// getDisplayMatching always answers (with the nearest display when nothing
+// overlaps), so the overlap with that display's work area has to be checked here.
+function usableBounds(saved) {
+  if (!saved || typeof saved !== 'object') return null;
+  const { x, y, width, height } = saved;
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  if (width < MIN_WIDTH || height < MIN_HEIGHT) return null;
+  const wa = screen.getDisplayMatching({ x, y, width, height }).workArea;
+  const overlaps = x < wa.x + wa.width && x + width > wa.x && y < wa.y + wa.height && y + height > wa.y;
+  return overlaps ? { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) } : null;
+}
+
+// Remember where the window was (its restored size if it is maximized) and whether
+// it was maximized, for the next launch.
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  writeSettings({ windowBounds: mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() });
+}
+
 function createWindow() {
   forceClose = false; // a fresh window starts with no pending force-quit
   const settings = readSettings();
@@ -114,8 +138,10 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
-    minWidth: 480,
-    minHeight: 360,
+    // Saved bounds go to the constructor so the window opens in place, not after a jump.
+    ...usableBounds(settings.windowBounds),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     backgroundColor: dark ? BG_DARK : BG_LIGHT,
     title: 'SMR',
     icon: path.join(__dirname, process.platform === 'win32' ? 'icon-dark.ico' : 'icon-dark.png'),
@@ -126,6 +152,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     }
   });
+
+  if (settings.maximized === true) mainWindow.maximize();
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
@@ -162,6 +190,7 @@ function createWindow() {
   // renderer then drives the Save All / Don't Save / Cancel flow and calls back
   // via app:force-quit so it can reuse the same save logic the tabs already use.
   mainWindow.on('close', (event) => {
+    saveWindowState(); // first, so a cancelled or intercepted close still records it
     if (forceClose || dirtyCount === 0) return;
     event.preventDefault();
     if (mainWindow) mainWindow.webContents.send('app:quit-requested');

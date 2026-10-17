@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, screen, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +29,38 @@ const MD_EXTS = ['md', 'markdown', 'mdown', 'mkd'];
 const FILE_FILTERS = [{ name: 'Markdown', extensions: MD_EXTS }];
 
 const REPO_URL = 'https://github.com/SWDesertPenguin/SMR';
+
+// --- Settings --------------------------------------------------------------
+
+// User preferences live in one JSON file in userData. Everything here is
+// synchronous and best-effort: a missing, unreadable or malformed file reads as {}
+// and a failed write is logged, so a bad settings file never stops the app starting.
+function settingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function readSettings() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+// Merge `partial` into what is on disk. Written beside the target and renamed over
+// it so a crash mid-write can't leave a half-written settings file.
+function writeSettings(partial) {
+  try {
+    const file = settingsPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...readSettings(), ...partial }, null, 2));
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    console.error('writing settings failed:', err);
+  }
+}
 
 function isMarkdown(filePath) {
   if (typeof filePath !== 'string') return false;
@@ -450,6 +482,34 @@ ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
 });
 
 ipcMain.handle('shell:open-external', (_evt, url) => openExternalUrl(url));
+
+// The one synchronous IPC in the app. The preload asks once at load so the page
+// knows its theme before it first paints. systemDark rides along in the payload but
+// is never stored. returnValue is always set: leaving it unset blocks the renderer.
+ipcMain.on('settings:get', (event) => {
+  let payload;
+  try {
+    payload = { ...readSettings(), systemDark: nativeTheme.shouldUseDarkColors };
+  } catch (_) {
+    payload = { systemDark: false };
+  }
+  event.returnValue = payload;
+});
+
+// Settings the renderer may change. The rest of the file (window bounds, skipped
+// update version) belongs to main, so the page can't rewrite it.
+const RENDERER_SETTINGS = {
+  theme: (v) => v === 'light' || v === 'dark'
+};
+
+ipcMain.handle('settings:set', (_evt, partial) => {
+  if (!partial || typeof partial !== 'object' || Array.isArray(partial)) return;
+  const accepted = {};
+  for (const [key, value] of Object.entries(partial)) {
+    if (Object.hasOwn(RENDERER_SETTINGS, key) && RENDERER_SETTINGS[key](value)) accepted[key] = value;
+  }
+  if (Object.keys(accepted).length > 0) writeSettings(accepted);
+});
 
 ipcMain.on('app:dirty', (_evt, n) => {
   dirtyCount = Number(n) || 0;

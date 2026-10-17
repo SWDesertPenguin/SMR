@@ -476,11 +476,23 @@ function showEmpty() {
 
 // --- Tab bar + title UI ----------------------------------------------------
 function renderTabBar() {
+  // The rebuild below replaces every tab element, which would drop keyboard focus
+  // from one that has it. Note which it was so focus can go back to its successor.
+  const focusedId = elTabs.contains(document.activeElement)
+    ? document.activeElement.closest('.tab')?.dataset.id
+    : undefined;
   elTabs.innerHTML = '';
+  // Roving tabindex: the tab strip is one Tab stop, on the active tab (or the first
+  // one if none is active), and the arrow keys move within it.
+  const stopId = tabs.some((t) => t.id === activeId) ? activeId : tabs[0]?.id;
   tabs.forEach((tab) => {
     const el = document.createElement('div');
     el.className = 'tab';
     el.dataset.id = String(tab.id);
+    el.setAttribute('role', 'tab');
+    el.setAttribute('aria-selected', String(tab.id === activeId));
+    el.setAttribute('aria-label', tabAriaLabel(tab));
+    el.tabIndex = tab.id === stopId ? 0 : -1;
     el.classList.toggle('active', tab.id === activeId);
     el.classList.toggle('conflict', tab.conflict);
     el.title = tabTooltip(tab);
@@ -490,19 +502,48 @@ function renderTabBar() {
     name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
     el.appendChild(name);
 
+    // Not a Tab stop of its own (it would break the roving tabindex); Ctrl+W closes
+    // from the keyboard.
     const close = document.createElement('button');
     close.className = 'tab-close';
+    close.tabIndex = -1;
     close.textContent = '×';
     close.title = `Close tab (${shortcutHint('W')})`;
+    close.setAttribute('aria-label', `Close ${tab.name}`);
     close.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.id); });
     el.appendChild(close);
 
     el.addEventListener('click', () => switchTab(tab.id));
+    el.addEventListener('keydown', (e) => onTabKeydown(e, tab));
     el.addEventListener('auxclick', (e) => {
       if (e.button === 1) { e.preventDefault(); closeTab(tab.id); }
     });
     elTabs.appendChild(el);
   });
+  if (focusedId) elTabs.querySelector(`.tab[data-id="${focusedId}"]`)?.focus();
+}
+
+// Enter/Space activate the tab. Left/Right move to the neighbouring tab (wrapping)
+// and activate it, keeping focus on the tab strip rather than jumping into the editor.
+function onTabKeydown(e, tab) {
+  if (e.target !== e.currentTarget) return; // keys on the close button are its own
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    switchTab(tab.id);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+    switchTab(next.id);
+    // switchTab hands focus to the editor; take it back for the tab that was chosen.
+    elTabs.querySelector(`.tab[data-id="${next.id}"]`)?.focus();
+  }
+}
+
+// Accessible name for a tab: the close button inside it would otherwise be read as
+// part of the name, and the unsaved bullet as "bullet".
+function tabAriaLabel(tab) {
+  return isDirty(tab) ? `${tab.name}, unsaved changes` : tab.name;
 }
 
 // Hover text for a tab: where it lives, plus what is wrong with it on disk.
@@ -517,6 +558,7 @@ function updateTabLabel(tab) {
   if (el) {
     el.classList.toggle('conflict', tab.conflict);
     el.title = tabTooltip(tab);
+    el.setAttribute('aria-label', tabAriaLabel(tab));
     const name = el.querySelector('.tab-name');
     if (name) name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
   }

@@ -49,6 +49,16 @@ html, body {
 
 ::selection { background: var(--selection); }
 
+/* Keyboard focus ring for the controls that had none of their own. Drawn inside the
+   box so the bars and panes they sit in can't clip it. */
+.editor:focus-visible,
+.tab:focus-visible,
+.iconbtn:focus-visible,
+.gutter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* ---- Top bar ------------------------------------------------------------ */
 #topbar {
   position: fixed;
@@ -277,7 +287,6 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
   height: 100%;
   resize: none;
   border: 0;
-  outline: none;
   padding: 16px 20px;
   background: var(--bg);
   color: var(--text);

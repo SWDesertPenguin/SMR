@@ -218,12 +218,16 @@ function buildToc() {
     a.href = `#${h.id}`;
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      h.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     });
     li.appendChild(a);
     elTocList.appendChild(li);
   });
 }
+
+// Smooth scrolling is skipped for anyone who asked the OS for reduced motion. Checked
+// on each call so a change to that setting applies without a reload.
+const scrollBehavior = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
 // Highlight the active TOC entry while scrolling the preview.
 const tocObserver = new IntersectionObserver(
@@ -252,7 +256,7 @@ function scrollToFragment(fragment) {
   if (!frag) return;
   const target = elContent.querySelector(`#${CSS.escape(`md-${frag}`)}`)
     || elContent.querySelector(`#${CSS.escape(frag)}`);
-  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (target) target.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
 }
 
 // A relative link to another Markdown file opens it as a tab. Untitled tabs have no

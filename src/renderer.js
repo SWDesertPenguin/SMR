@@ -808,16 +808,47 @@ function initGutter(gutter, onDrag) {
   });
 }
 
+const tocMaxWidth = () => window.innerWidth * 0.6;
+
 function setTocWidth(px) {
-  const w = clampTocWidth(px, window.innerWidth * 0.6);
+  const w = clampTocWidth(px, tocMaxWidth());
   document.documentElement.style.setProperty('--toc-width', `${w}px`);
   localStorage.setItem('tocWidth', String(w));
+  syncGutterAria();
 }
 
 function setSplitPos(fraction) {
   const pct = `${(clampSplitFraction(fraction) * 100).toFixed(2)}%`;
   document.documentElement.style.setProperty('--split-pos', pct);
   localStorage.setItem('splitPos', pct);
+  syncGutterAria();
+}
+
+// The pane sizes live in two CSS variables, set by a drag, a restore, or the arrow
+// keys below. Reading them back keeps one source of truth and covers the defaults
+// from styles.css when nothing has been set yet.
+const currentTocWidth = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toc-width'));
+const currentSplitFraction = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--split-pos')) / 100;
+
+// A focusable separator needs its value for a screen reader: the contents width in
+// px, and the editor's share of the split in percent. The bounds are the clamps.
+function syncGutterAria() {
+  gutterToc.setAttribute('aria-valuemin', String(clampTocWidth(0, Infinity)));
+  gutterToc.setAttribute('aria-valuemax', String(Math.round(tocMaxWidth())));
+  gutterToc.setAttribute('aria-valuenow', String(Math.round(currentTocWidth())));
+  gutterSplit.setAttribute('aria-valuemin', String(Math.round(clampSplitFraction(0) * 100)));
+  gutterSplit.setAttribute('aria-valuemax', String(Math.round(clampSplitFraction(1) * 100)));
+  gutterSplit.setAttribute('aria-valuenow', String(Math.round(currentSplitFraction() * 100)));
+}
+window.addEventListener('resize', syncGutterAria);
+
+// Left/Right nudge the divider the way a drag would: toward the arrow's side.
+function initGutterKeys(gutter, nudge) {
+  gutter.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    nudge(e.key === 'ArrowRight' ? 1 : -1);
+  });
 }
 
 initGutter(gutterToc, (clientX) => {
@@ -827,6 +858,8 @@ initGutter(gutterSplit, (clientX) => {
   const rect = elPanes.getBoundingClientRect();
   if (rect.width > 0) setSplitPos((clientX - rect.left) / rect.width);
 });
+initGutterKeys(gutterToc, (dir) => setTocWidth(currentTocWidth() + dir * 16));
+initGutterKeys(gutterSplit, (dir) => setSplitPos(currentSplitFraction() + dir * 0.02));
 
 // --- Help overlay ----------------------------------------------------------
 // One row per shortcut; MOD is substituted with ⌘ or Ctrl and each key token
@@ -978,6 +1011,7 @@ const savedTocW = parseFloat(localStorage.getItem('tocWidth'));
 if (Number.isFinite(savedTocW)) setTocWidth(savedTocW);
 const savedSplit = parseFloat(localStorage.getItem('splitPos'));
 if (Number.isFinite(savedSplit)) setSplitPos(savedSplit / 100);
+syncGutterAria(); // covers the defaults when nothing was restored
 
 buildHelp();
 localizeShortcuts();

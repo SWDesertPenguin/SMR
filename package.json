@@ -2,6 +2,7 @@
   "name": "smr",
   "version": "2.1.1",
   "description": "SMR (Standalone Markdown Reader): a simple desktop Markdown reader and editor with tabs",
+  "homepage": "https://github.com/SWDesertPenguin/SMR",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -10,9 +11,10 @@
     "test": "node --test",
     "dist": "electron-builder",
     "dist:portable": "electron-builder --win portable",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
-  "author": "",
+  "author": "SWDesertPenguin",
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -110,6 +112,35 @@
     },
     "dmg": {
       "title": "SMR ${version}"
+    },
+    "linux": {
+      "icon": "icon-dark.png",
+      "maintainer": "SWDesertPenguin <SWDesertPenguin@users.noreply.github.com>",
+      "category": "Office;TextEditor",
+      "synopsis": "Standalone Markdown reader and editor with tabs",
+      "mimeTypes": [
+        "text/markdown"
+      ],
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

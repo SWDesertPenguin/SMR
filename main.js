@@ -579,24 +579,46 @@ ipcMain.on('app:quit-cancelled', () => {
 // --- Auto-update -----------------------------------------------------------
 
 // Every GitHub release built by .github/workflows/release.yml ships a
-// latest.yml / latest-mac.yml feed alongside the installers; electron-updater
-// reads that feed to find newer *published* releases (drafts stay invisible
-// to it, matching that workflow's review-then-publish flow).
+// latest.yml / latest-linux.yml / latest-mac.yml feed alongside the installers;
+// electron-updater reads that feed to find newer *published* releases (drafts
+// stay invisible to it, matching that workflow's review-then-publish flow).
 let manualUpdateCheck = false; // only surface "up to date" / error dialogs when the user asked
 
-function initAutoUpdater() {
-  if (!app.isPackaged) return; // no update feed to read outside a real build
-  if (process.env.PORTABLE_EXECUTABLE_DIR) return; // portable build: nothing to install into
+// The three update capabilities, kept as predicates so initAutoUpdater and the
+// menu item can't drift apart the way two inline platform checks would.
 
-  // Unsigned macOS builds fail Squirrel.Mac's signature check (see the
-  // release workflow's CSC_IDENTITY_AUTO_DISCOVERY note), so mac only checks
-  // for a newer version and points the user at the release page instead of
-  // downloading and installing it.
-  autoUpdater.autoDownload = process.platform === 'win32';
-  autoUpdater.autoInstallOnAppQuit = true;
+// Is there an update feed to read at all? The portable .exe has no install
+// location, so it never checks.
+function hasUpdateFeed() {
+  return app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR;
+}
+
+// Can this build apply an update itself? electron-updater picks the installer
+// backend per platform: NsisUpdater on Windows, and on Linux AppImage/Deb/Rpm
+// chosen from the `package-type` marker electron-builder writes into deb and rpm
+// packages. macOS is excluded because unsigned builds fail Squirrel.Mac's
+// signature check (see the release workflow's CSC_IDENTITY_AUTO_DISCOVERY note),
+// so mac only checks for a newer version and links the release page.
+function canSelfUpdate() {
+  return process.platform === 'win32' || process.platform === 'linux';
+}
+
+// Can the install finish without the user present? deb and rpm install through
+// dpkg/rpm behind a graphical sudo prompt, so their install has to stay tied to
+// a button the user just pressed — a root-password dialog appearing on its own
+// mid-quit is not acceptable. Windows and AppImage need no elevation.
+function canInstallUnattended() {
+  return canSelfUpdate() && (process.platform === 'win32' || !!process.env.APPIMAGE);
+}
+
+function initAutoUpdater() {
+  if (!hasUpdateFeed()) return;
+
+  autoUpdater.autoDownload = canSelfUpdate();
+  autoUpdater.autoInstallOnAppQuit = canInstallUnattended();
 
   autoUpdater.on('update-available', (info) => {
-    if (process.platform === 'win32') {
+    if (canSelfUpdate()) {
       // Downloads silently in the background; 'update-downloaded' below prompts
       // to restart. Only say something now if the user explicitly asked.
       if (manualUpdateCheck) {
@@ -646,7 +668,10 @@ function initAutoUpdater() {
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       message: `SMR ${info.version} is ready to install`,
-      detail: 'Restart now to finish updating?',
+      // deb/rpm hand the install to dpkg/rpm, which needs root.
+      detail: canInstallUnattended()
+        ? 'Restart now to finish updating?'
+        : 'Restart now to finish updating? Your system will ask for your password to install the package.',
       buttons: ['Restart Now', 'Later'],
       defaultId: 0,
       cancelId: 1
@@ -756,7 +781,7 @@ function buildMenu() {
         { type: 'separator' },
         {
           label: 'Check for Updates…',
-          enabled: app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR,
+          enabled: hasUpdateFeed(),
           click: checkForUpdatesManually
         },
         // The mac app menu has its own About item, fed by setAboutPanelOptions above.

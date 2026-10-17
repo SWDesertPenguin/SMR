@@ -1,6 +1,6 @@
 # SMR — Standalone Markdown Reader & Editor
 
-A simple desktop Markdown reader and editor built with Electron, for Windows and macOS. Open one or more `.md` files in tabs, edit them with a live side-by-side preview, and read them with clean styling, syntax-highlighted code, a table of contents, and a dark mode. SMR works with Markdown files only. This file doubles as a sample document for testing the app.
+A simple desktop Markdown reader and editor built with Electron, for Windows, macOS, and Linux. Open one or more `.md` files in tabs, edit them with a live side-by-side preview, and read them with clean styling, syntax-highlighted code, a table of contents, and a dark mode. SMR works with Markdown files only. This file doubles as a sample document for testing the app.
 
 ## Getting started
 
@@ -29,7 +29,7 @@ macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that
 - Collapsible table of contents (`Ctrl+T`) that tracks your scroll position
 - Dark mode toggle (`Ctrl+D`); it follows your system theme until you pick one, and your choice is remembered between sessions along with the window size and position
 - Live re-render when an open file changes on disk; conflicting external edits are flagged instead of overwriting your changes
-- Runs on Windows and macOS, with platform-correct keyboard shortcuts
+- Runs on Windows, macOS, and Linux, with platform-correct keyboard shortcuts
 
 ## Keyboard shortcuts
 
@@ -55,9 +55,14 @@ On macOS use `⌘` in place of `Ctrl`.
 npm run dist          # installers for the current platform
 npm run dist:portable # Windows portable .exe
 npm run dist:mac      # macOS .dmg and .zip (must be run on macOS)
+npm run dist:linux    # Linux AppImage, .deb, and .rpm (must be run on Linux)
 ```
 
 macOS builds produce universal `x64` + `arm64` artifacts and must be built on a Mac; the app itself is unsigned, so first launch needs a right-click → Open.
+
+Linux builds produce `x64` artifacts and must be built on Linux. The `.rpm` target shells out to `rpmbuild`, so install it first (`sudo apt install rpm` on Debian/Ubuntu); AppImage and `.deb` need nothing extra. The AppImage is the portable option — `chmod +x` it and run it. The `.deb` and `.rpm` install to `/opt/SMR` and add a `smr` command on your `PATH`.
+
+Updates install in place: the AppImage replaces itself silently, while `.deb` asks for your password because `dpkg` does the work. An unsigned `.rpm` update may be refused depending on your distro's package-verification policy, in which case reinstall from the release page.
 
 ## Task list
 

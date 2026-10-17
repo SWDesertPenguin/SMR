@@ -1,6 +1,6 @@
-# Builds SMR installers for Windows and macOS with electron-builder, then a
-# single job attaches them all to one draft GitHub Release. Splitting build from
-# publish means only one job ever creates the release, so the two OS legs can't
+# Builds SMR installers for Windows, macOS, and Linux with electron-builder, then
+# a single job attaches them all to one draft GitHub Release. Splitting build from
+# publish means only one job ever creates the release, so the OS legs can't
 # race and mint duplicate drafts (which they did on v2.0.0).
 #
 # Push a version tag (e.g. `v2.0.1`) to build and publish a DRAFT release you
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -29,6 +29,11 @@ jobs:
           node-version: 20.x
           cache: 'npm'
       - run: npm ci
+      # electron-builder shells out to fpm for the rpm target, which needs
+      # rpmbuild. AppImage and deb need nothing beyond the default image.
+      - name: Install rpm tooling
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
       - name: Build installers
         run: npx electron-builder --publish never
         env:
@@ -38,10 +43,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: installers-${{ matrix.os }}
+          # One shared list across all three legs; if-no-files-found only fails
+          # when nothing at all matches, so the unused patterns are harmless.
           path: |
             dist/*.exe
             dist/*.dmg
             dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
             dist/*.blockmap
             dist/latest*.yml
           if-no-files-found: error

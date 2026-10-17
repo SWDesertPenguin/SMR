@@ -64,6 +64,11 @@ function isDirty(tab) {
   return tab.el.value !== tab.saved;
 }
 
+// The text of a tab: its name, behind a bullet while it has unsaved edits.
+function tabLabel(tab) {
+  return (isDirty(tab) ? '• ' : '') + tab.name;
+}
+
 // --- Rendering -------------------------------------------------------------
 const HEADINGS = 'h1, h2, h3, h4, h5, h6';
 
@@ -503,7 +508,7 @@ function renderTabBar() {
 
     const name = document.createElement('span');
     name.className = 'tab-name';
-    name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
+    name.textContent = tabLabel(tab);
     el.appendChild(name);
 
     // Not a Tab stop of its own (it would break the roving tabindex); Ctrl+W closes
@@ -564,7 +569,7 @@ function updateTabLabel(tab) {
     el.title = tabTooltip(tab);
     el.setAttribute('aria-label', tabAriaLabel(tab));
     const name = el.querySelector('.tab-name');
-    if (name) name.textContent = (isDirty(tab) ? '• ' : '') + tab.name;
+    if (name) name.textContent = tabLabel(tab);
   }
   if (tab.id === activeId) updateActiveUi();
 }
@@ -573,7 +578,7 @@ function updateActiveUi() {
   const tab = getActiveTab();
   if (!tab) return;
   elFilename.textContent = tab.path || tab.name;
-  document.title = `${isDirty(tab) ? '• ' : ''}${tab.name} — SMR`;
+  document.title = `${tabLabel(tab)} — SMR`;
 }
 
 function cycleTab(dir) {
@@ -892,7 +897,7 @@ function buildHelp() {
   if (gh) {
     gh.addEventListener('click', (e) => {
       e.preventDefault();
-      window.md.openExternal('https://github.com/SWDesertPenguin/SMR');
+      window.md.openExternal(window.md.settings.repoUrl);
     });
   }
   document.getElementById('help-close')?.addEventListener('click', hideHelp);

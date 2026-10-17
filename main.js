@@ -476,6 +476,10 @@ ipcMain.handle('watch:set', (_evt, paths) => {
   setWatched(Array.isArray(paths) ? paths : []);
 });
 
+// Both unsaved-changes prompts list their buttons in this order (Save, Don't Save,
+// Cancel); the clicked index is mapped to the name the renderer switches on.
+const CHOICES = ['save', 'discard', 'cancel'];
+
 ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
@@ -485,7 +489,7 @@ ipcMain.handle('dialog:confirm-close', async (_evt, name) => {
     message: `Save changes to ${name}?`,
     detail: "Your changes will be lost if you don't save them."
   });
-  return ['save', 'discard', 'cancel'][response];
+  return CHOICES[response];
 });
 
 // Reload throws away the tab's unsaved edits, so Cancel is the default and the Esc
@@ -512,20 +516,23 @@ ipcMain.handle('dialog:confirm-quit', async (_evt, n) => {
     message: 'You have unsaved changes.',
     detail: `${n} file(s) have unsaved changes. Save before quitting?`
   });
-  return ['save', 'discard', 'cancel'][response];
+  return CHOICES[response];
 });
 
 ipcMain.handle('shell:open-external', (_evt, url) => openExternalUrl(url));
 
 // The one synchronous IPC in the app. The preload asks once at load so the page
-// knows its theme before it first paints. systemDark rides along in the payload but
-// is never stored. returnValue is always set: leaving it unset blocks the renderer.
+// knows its theme before it first paints. systemDark, repoUrl and version ride along
+// in the payload but are never stored, and they follow the spread so a hand-edited
+// settings file can't override them. returnValue is always set: leaving it unset
+// blocks the renderer.
 ipcMain.on('settings:get', (event) => {
+  const fixed = { repoUrl: REPO_URL, version: app.getVersion() };
   let payload;
   try {
-    payload = { ...readSettings(), systemDark: nativeTheme.shouldUseDarkColors };
+    payload = { ...readSettings(), systemDark: nativeTheme.shouldUseDarkColors, ...fixed };
   } catch (_) {
-    payload = { systemDark: false };
+    payload = { systemDark: false, ...fixed };
   }
   event.returnValue = payload;
 });

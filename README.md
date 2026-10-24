@@ -20,6 +20,7 @@ macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that
 - Resizable panes: drag the dividers, or focus one and press the left and right arrow keys, to size the contents list and the editor/preview split; sizes are remembered
 - Synchronized scrolling in split view — scroll either side and the other follows
 - Cycle the layout (`Ctrl+E`) between split, preview-only, and editor-only
+- Preview-only keeps lines at a readable length by default; toggle full width (`Ctrl+Shift+E`) to let the text fill the window
 - Save (`Ctrl+S`) and Save As (`Ctrl+Shift+S`); new files default to a `.md` name
 - Open via menu, drag-and-drop, or a file path argument — Markdown files only
 - GitHub-flavored Markdown: tables, task lists, fenced code, autolinks
@@ -43,6 +44,7 @@ macOS users: shortcuts use `⌘` in place of `Ctrl`, and the app shows them that
 | Close tab            | `Ctrl+W`         |
 | Next / previous tab  | `Ctrl+PgDn/PgUp` |
 | Cycle layout         | `Ctrl+E`         |
+| Full-width preview   | `Ctrl+Shift+E`   |
 | Toggle dark mode     | `Ctrl+D`         |
 | Toggle contents      | `Ctrl+T`         |
 | Help                 | `Ctrl+/`         |

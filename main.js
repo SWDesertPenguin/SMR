@@ -758,6 +758,7 @@ function buildMenu() {
         { label: 'Toggle Dark Mode', accelerator: 'CmdOrCtrl+D', click: () => sendMenuAction('toggle-theme') },
         { label: 'Toggle Table of Contents', accelerator: 'CmdOrCtrl+T', click: () => sendMenuAction('toggle-toc') },
         { label: 'Cycle Layout (Split / Preview / Editor)', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('toggle-layout') },
+        { label: 'Toggle Full-Width Preview', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendMenuAction('toggle-full-width') },
         { label: 'Load Remote Images', click: () => sendMenuAction('toggle-remote-images') },
         { type: 'separator' },
         { label: 'Next Tab', accelerator: 'CmdOrCtrl+PageDown', click: () => sendMenuAction('next-tab') },

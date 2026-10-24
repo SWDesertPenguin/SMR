@@ -763,6 +763,17 @@ function toggleToc() {
   localStorage.setItem('tocHidden', document.body.classList.contains('toc-hidden') ? '1' : '0');
 }
 
+// --- Preview width ---------------------------------------------------------
+// Preview-only layout caps the line length (styles.css); full width lifts the cap.
+function applyFullWidth(on) {
+  document.body.classList.toggle('full-width', on);
+  localStorage.setItem('fullWidth', on ? '1' : '0');
+}
+
+function toggleFullWidth() {
+  applyFullWidth(!document.body.classList.contains('full-width'));
+}
+
 // --- Layout ----------------------------------------------------------------
 const LAYOUTS = ['split', 'preview', 'editor'];
 let currentLayout = 'split';
@@ -881,6 +892,7 @@ const SHORTCUTS = [
   ['Close tab', 'MOD+W'],
   ['Next / previous tab', 'MOD+PgDn / MOD+PgUp'],
   ['Cycle layout', 'MOD+E'],
+  ['Toggle full-width preview', 'MOD+Shift+E'],
   ['Toggle dark mode', 'MOD+D'],
   ['Toggle contents', 'MOD+T'],
   ['Help', 'MOD+/']
@@ -991,6 +1003,7 @@ window.md.onMenuAction((action) => {
     case 'toggle-theme': toggleTheme(); break;
     case 'toggle-toc': toggleToc(); break;
     case 'toggle-layout': cycleLayout(); break;
+    case 'toggle-full-width': toggleFullWidth(); break;
     case 'toggle-remote-images': toggleRemoteImages(); break;
     case 'help': toggleHelp(); break;
   }
@@ -1013,6 +1026,7 @@ const initialTheme = resolveTheme(settings.theme, localStorage.getItem('theme'),
 applyTheme(initialTheme.theme, initialTheme.migrate);
 applyRemoteImages(remoteImages);
 if (localStorage.getItem('tocHidden') === '1') document.body.classList.add('toc-hidden');
+applyFullWidth(localStorage.getItem('fullWidth') === '1');
 setLayout(validLayout(localStorage.getItem('layout'), LAYOUTS, 'split'));
 
 // Restore persisted pane sizes (clamped in case the window is now narrower).

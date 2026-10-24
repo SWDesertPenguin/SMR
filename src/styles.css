@@ -345,8 +345,8 @@ body.no-tabs #empty-state { display: flex; }
   word-wrap: break-word;
 }
 /* Split view lets the text fill its pane; preview-only has the whole window, so
-   cap the measure to keep lines readable. */
-body.layout-preview .markdown-body { max-width: 100ch; margin: 0 auto; }
+   cap the measure to keep lines readable unless the reader asked for full width. */
+body.layout-preview:not(.full-width) .markdown-body { max-width: 100ch; margin: 0 auto; }
 
 .markdown-body h1,
 .markdown-body h2,

@@ -582,7 +582,11 @@ ipcMain.on('app:quit-cancelled', () => {
 // latest.yml / latest-linux.yml / latest-mac.yml feed alongside the installers;
 // electron-updater reads that feed to find newer *published* releases (drafts
 // stay invisible to it, matching that workflow's review-then-publish flow).
-let manualUpdateCheck = false; // only surface "up to date" / error dialogs when the user asked
+// Set by the menu item and cleared once the check reaches a terminal state:
+// "up to date", a download finished, or an error. It deliberately stays set
+// while a download the user asked for is in flight, so a failed download shows
+// an error box instead of vanishing after the "found, downloading" message.
+let manualUpdateCheck = false;
 
 // The three update capabilities, kept as predicates so initAutoUpdater and the
 // menu item can't drift apart the way two inline platform checks would.
@@ -620,7 +624,8 @@ function initAutoUpdater() {
   autoUpdater.on('update-available', (info) => {
     if (canSelfUpdate()) {
       // Downloads silently in the background; 'update-downloaded' below prompts
-      // to restart. Only say something now if the user explicitly asked.
+      // to restart. Only say something now if the user explicitly asked, and
+      // leave manualUpdateCheck set so a failed download is reported too.
       if (manualUpdateCheck) {
         dialog.showMessageBox(mainWindow, {
           type: 'info',
@@ -643,8 +648,8 @@ function initAutoUpdater() {
         if (response === 0) openExternalUrl(`${REPO_URL}/releases/latest`);
         else if (response === 2) writeSettings({ skippedVersion: info.version });
       }).catch(() => {});
+      manualUpdateCheck = false;
     }
-    manualUpdateCheck = false;
   });
 
   autoUpdater.on('update-not-available', () => {
@@ -659,12 +664,13 @@ function initAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
-    console.error('auto-update check failed:', err);
-    if (manualUpdateCheck) dialog.showErrorBox('Update check failed', err.message);
+    console.error('auto-update failed:', err);
+    if (manualUpdateCheck) dialog.showErrorBox('Update failed', err.message);
     manualUpdateCheck = false;
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    manualUpdateCheck = false;
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       message: `SMR ${info.version} is ready to install`,

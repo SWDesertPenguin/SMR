@@ -1,6 +1,6 @@
 {
   "name": "smr",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "SMR (Standalone Markdown Reader): a simple desktop Markdown reader and editor with tabs",
   "homepage": "https://github.com/SWDesertPenguin/SMR",
   "main": "main.js",
